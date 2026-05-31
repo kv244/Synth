@@ -6,7 +6,7 @@ by **Razvan Julian Petrescu** / **AudioDSP**.
 ## Features
 
 - **4 Waveforms** — Sine, Square, Triangle, Sawtooth
-- **Low-pass Filter** — adjustable cutoff (20 Hz – 20 kHz)
+- **Low-pass Filter** — adjustable cutoff (20 Hz – 20 kHz) with on/off bypass toggle
 - **8-voice Polyphony** — up to 8 simultaneous notes with voice stealing
 - **Release tail** — smooth ~300 ms exponential fade on note-off
 - **Post-filter waveform display** — live output visualiser in the UI
@@ -36,11 +36,11 @@ cmake -S . -B build \
 cmake --build build --config Release
 ```
 
-On Windows with JUCE downloaded to `C:\Users\julia\Downloads\juce-8.0.13-windows\JUCE`:
+On Windows (PowerShell):
 
 ```powershell
 cmake -S . -B build `
-      -DJUCE_DIR="C:/Users/julia/Downloads/juce-8.0.13-windows/JUCE" `
+      -DJUCE_DIR="C:/path/to/JUCE" `
       -DCMAKE_BUILD_TYPE=Release
 
 cmake --build build --config Release
@@ -73,6 +73,7 @@ the **AudioDSP** manufacturer in your DAW's instrument browser.
 | Control | Colour | Description |
 |---|---|---|
 | Waveform | Cyan | Oscillator shape — Sine / Square / Triangle / Sawtooth |
+| Filter ON | Magenta | Toggle button — enables / bypasses the filter (dims the cutoff slider when off) |
 | Cutoff | Magenta | Low-pass filter cutoff frequency (20 Hz – 20 kHz) |
 | Output | Cyan | Live post-filter waveform display |
 
@@ -99,7 +100,7 @@ Expected output:
 
 ```
 Loading plugin …
-Parameters: ['waveform', 'cutoff', 'bypass']
+Parameters: ['waveform', 'cutoff', 'filterEnabled', 'bypass']
 
   PASS  Single note             RMS=0.5038
   PASS  Polyphony (4ch)         single=0.5038  chord=1.0947
