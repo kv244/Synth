@@ -1,5 +1,8 @@
 # Neon Synth
 
+[![Build](https://github.com/kv244/Synth/actions/workflows/build.yml/badge.svg)](https://github.com/kv244/Synth/actions/workflows/build.yml)
+[![Lint](https://github.com/kv244/Synth/actions/workflows/lint.yml/badge.svg)](https://github.com/kv244/Synth/actions/workflows/lint.yml)
+
 A futuristic, neon-styled virtual analog synthesizer built with JUCE and C++17,
 by **Razvan Julian Petrescu** / **AudioDSP**.
 
@@ -216,3 +219,7 @@ audio_bright = plugin.process(msgs, 2.5, SR, reset=True)
 | `gui_background.png` | Neon grid background image (embedded as binary data) |
 | `icon.png` | Application / plugin icon |
 | `test_midi.py` | Automated Python test suite |
+| `pyproject.toml` | Ruff lint configuration |
+| `.github/workflows/build.yml` | CI — CMake build on Ubuntu |
+| `.github/workflows/lint.yml` | CI — Python ruff lint |
+| `LICENSE` | MIT licence |

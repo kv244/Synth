@@ -1,0 +1,48 @@
+name: Build
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y \
+            cmake ninja-build \
+            libasound2-dev \
+            libcurl4-openssl-dev \
+            libx11-dev libxcomposite-dev libxcursor-dev \
+            libxext-dev libxinerama-dev libxrandr-dev libxrender-dev \
+            libfreetype6-dev libglib2.0-dev libgl1-mesa-dev libgtk-3-dev \
+            libwebkit2gtk-4.0-dev || \
+          sudo apt-get install -y libwebkit2gtk-4.1-dev || true
+
+      - name: Cache JUCE
+        id: cache-juce
+        uses: actions/cache@v4
+        with:
+          path: /tmp/JUCE
+          key: juce-${{ runner.os }}-main
+
+      - name: Clone JUCE
+        if: steps.cache-juce.outputs.cache-hit != 'true'
+        run: git clone --depth=1 https://github.com/juce-framework/JUCE.git /tmp/JUCE
+
+      - name: Configure
+        run: |
+          cmake -S . -B build \
+            -G Ninja \
+            -DJUCE_DIR=/tmp/JUCE \
+            -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build VST3
+        run: cmake --build build --target BasicSynth_VST3
