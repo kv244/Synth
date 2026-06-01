@@ -20,7 +20,10 @@ public:
     bool acceptsMidi() const override { return true; }
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
-    double getTailLengthSeconds() const override { return 0.5; }
+    double getTailLengthSeconds() const override
+    {
+        return releaseParameter != nullptr ? (double) releaseParameter->get() : 0.5;
+    }
 
     int getNumPrograms() override { return 1; }
     int getCurrentProgram() override { return 0; }
@@ -42,6 +45,10 @@ private:
     juce::AudioParameterInt*   waveformParameter      = nullptr;
     juce::AudioParameterFloat* cutoffParameter        = nullptr;
     juce::AudioParameterBool*  filterEnabledParameter = nullptr;
+    juce::AudioParameterFloat* attackParameter        = nullptr;
+    juce::AudioParameterFloat* decayParameter         = nullptr;
+    juce::AudioParameterFloat* sustainParameter       = nullptr;
+    juce::AudioParameterFloat* releaseParameter       = nullptr;
 
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
