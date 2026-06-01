@@ -2,6 +2,8 @@
 
 [![Build](https://github.com/kv244/Synth/actions/workflows/build.yml/badge.svg)](https://github.com/kv244/Synth/actions/workflows/build.yml)
 [![Lint](https://github.com/kv244/Synth/actions/workflows/lint.yml/badge.svg)](https://github.com/kv244/Synth/actions/workflows/lint.yml)
+[![Release](https://github.com/kv244/Synth/actions/workflows/release.yml/badge.svg)](https://github.com/kv244/Synth/actions/workflows/release.yml)
+[![Latest release](https://img.shields.io/github/v/release/kv244/Synth)](https://github.com/kv244/Synth/releases/latest)
 
 A futuristic, neon-styled virtual analog synthesizer built with JUCE and C++17,
 by **Razvan Julian Petrescu** / **AudioDSP**.
@@ -16,6 +18,16 @@ by **Razvan Julian Petrescu** / **AudioDSP**.
 - **Custom neon GUI** — background image, cyan/magenta controls
 - **MIDI** — works with any MIDI controller or keyboard
 - **DAW automation** — all parameters are automatable in VST3 hosts
+
+---
+
+## Download
+
+Pre-built Windows installer: **[Latest release →](https://github.com/kv244/Synth/releases/latest)**
+
+Run `NeonSynth-x.y.z-Windows-Setup.exe`. The wizard installs the VST3 to
+`C:\Program Files\Common Files\VST3\` and optionally the standalone app to
+`C:\Program Files\AudioDSP\Neon Synth\`.
 
 ---
 
@@ -222,4 +234,6 @@ audio_bright = plugin.process(msgs, 2.5, SR, reset=True)
 | `pyproject.toml` | Ruff lint configuration |
 | `.github/workflows/build.yml` | CI — CMake build on Ubuntu |
 | `.github/workflows/lint.yml` | CI — Python ruff lint |
+| `.github/workflows/release.yml` | CI — builds installer and publishes GitHub Release on tag push |
+| `installer.nsi` | NSIS installer script (VST3 + Standalone) |
 | `LICENSE` | MIT licence |

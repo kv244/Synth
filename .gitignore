@@ -1,3 +1,4 @@
 build/
 *.user
 .vs/
+NeonSynth-*-Windows-Setup.exe

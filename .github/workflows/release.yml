@@ -1,0 +1,78 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-installer:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache JUCE
+        id: cache-juce
+        uses: actions/cache@v4
+        with:
+          path: C:\JUCE
+          key: juce-windows-main
+
+      - name: Clone JUCE
+        if: steps.cache-juce.outputs.cache-hit != 'true'
+        run: git clone --depth=1 https://github.com/juce-framework/JUCE.git C:\JUCE
+
+      - name: Configure
+        shell: bash
+        run: |
+          cmake -S . -B build \
+            -DJUCE_DIR="C:/JUCE" \
+            -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Install NSIS
+        run: choco install nsis -y --no-progress
+
+      - name: Extract version from tag
+        id: version
+        shell: pwsh
+        run: |
+          $v = "${{ github.ref_name }}" -replace '^v', ''
+          "tag=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          & "C:\Program Files (x86)\NSIS\makensis.exe" `
+              /DPRODUCT_VERSION=${{ steps.version.outputs.tag }} `
+              installer.nsi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Neon Synth ${{ github.ref_name }}"
+          body: |
+            ## Neon Synth ${{ github.ref_name }}
+            **Author:** Razvan Julian Petrescu / AudioDSP
+
+            ### Installation
+            Run **NeonSynth-${{ steps.version.outputs.tag }}-Windows-Setup.exe**.
+
+            The installer copies:
+            | Component | Destination |
+            |---|---|
+            | VST3 plugin | `C:\Program Files\Common Files\VST3\BasicSynth.vst3` |
+            | Standalone app | `C:\Program Files\AudioDSP\Neon Synth\BasicSynth.exe` |
+
+            ### Requirements
+            - Windows 10 / 11 (64-bit)
+            - VST3-compatible DAW for the plugin (Ableton, Bitwig, FL Studio, Reaper …)
+
+            ### What's new
+          files: NeonSynth-${{ steps.version.outputs.tag }}-Windows-Setup.exe
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
