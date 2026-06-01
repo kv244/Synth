@@ -59,9 +59,10 @@ SAMPLE_RATE = 44100
 BLOCK_SIZE  = 512
 
 # pedalboard requires the inner DLL, not the outer bundle folder
-VST3_PATH = (
-    r"C:\Users\julia\Documents\synth\build\BasicSynth_artefacts"
-    r"\Release\VST3\BasicSynth.vst3\Contents\x86_64-win\BasicSynth.vst3"
+VST3_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "build", "BasicSynth_artefacts", "Release",
+    "VST3", "BasicSynth.vst3", "Contents", "x86_64-win", "BasicSynth.vst3",
 )
 
 # ---------------------------------------------------------------------------

@@ -35,6 +35,17 @@ jobs:
       - name: Build
         run: cmake --build build --config Release
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install Python test dependencies
+        run: pip install pedalboard mido numpy
+
+      - name: Run plugin tests
+        run: python test_midi.py
+
       - name: Install NSIS
         run: choco install nsis -y --no-progress
 
