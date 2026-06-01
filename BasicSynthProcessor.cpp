@@ -46,7 +46,6 @@ void BasicSynthAudioProcessor::prepareToPlay (double sampleRate, int samplesPerB
         if (auto* v = dynamic_cast<BasicSynthVoice*> (synth.getVoice (i)))
         {
             v->prepareToPlay (sampleRate, samplesPerBlock, getTotalNumOutputChannels());
-            v->setLastSampleRate (sampleRate);
         }
 }
 

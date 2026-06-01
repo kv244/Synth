@@ -11,10 +11,7 @@ public:
 class BasicSynthVoice : public juce::SynthesiserVoice
 {
 public:
-    BasicSynthVoice()
-    {
-        filter.coefficients = juce::dsp::IIR::Coefficients<float>::makeLowPass (44100.0, 2000.0);
-    }
+    BasicSynthVoice() = default;
 
     bool canPlaySound (juce::SynthesiserSound* sound) override
     {
@@ -92,6 +89,8 @@ public:
                                       (juce::uint32) numChannels };
         osc.prepare (spec);
         filter.prepare (spec);
+        lastSampleRate = sampleRate;
+        lastCutoff     = -1.0f;  // force coefficient recalculation at new sample rate
         tempBuffer.setSize (numChannels, samplesPerBlock);
     }
 
@@ -119,8 +118,6 @@ public:
             filter.coefficients = juce::dsp::IIR::Coefficients<float>::makeLowPass (lastSampleRate, cutoffHz);
         }
     }
-
-    void setLastSampleRate (double sampleRate) { lastSampleRate = sampleRate; }
 
     void setADSR (float a, float d, float s, float r)
     {
