@@ -73,12 +73,24 @@ def load_plugin() -> pedalboard.VST3Plugin:
     return pedalboard.load_plugin(VST3_PATH)
 
 
-def set_params(plugin, cutoff_hz: float = 2000.0, waveform: int = 0):
+def _filter_param_name(plugin) -> str | None:
+    """Return the filter-enabled parameter name regardless of case/separator style."""
+    for name in plugin.parameters:
+        if "filter" in name.lower() and "enabled" in name.lower():
+            return name
+    return None
+
+
+def set_params(plugin, cutoff_hz: float = 2000.0, waveform: int = 0,
+               filter_on: bool = True):
     # raw_value is the VST3 normalized [0, 1] representation
-    cutoff_norm  = (cutoff_hz - 20.0) / (20000.0 - 20.0)
+    cutoff_norm   = (cutoff_hz - 20.0) / (20000.0 - 20.0)
     waveform_norm = waveform / 3.0
-    plugin.parameters["cutoff"].raw_value   = float(np.clip(cutoff_norm,  0.0, 1.0))
+    plugin.parameters["cutoff"].raw_value   = float(np.clip(cutoff_norm,   0.0, 1.0))
     plugin.parameters["waveform"].raw_value = float(np.clip(waveform_norm, 0.0, 1.0))
+    name = _filter_param_name(plugin)
+    if name:
+        plugin.parameters[name].raw_value = 1.0 if filter_on else 0.0
 
 
 def make_msgs(notes: list[int], velocity: int, note_dur_s: float) -> list:
@@ -178,15 +190,19 @@ def test_release_tail(plugin):
 def test_filter_low_cutoff(plugin):
     """
     Low cutoff (200 Hz) must attenuate high frequencies relative to 18 kHz cutoff.
-    Uses square wave (rich harmonics) to make the difference measurable.
+    Analysis threshold is 1.5 kHz: a 2nd-order IIR at 200 Hz gives ~37 dB of
+    separation there, making the ratio clear even with a single-pole filter.
+    (4 kHz is too high — both values become noise-floor tiny and the ratio is
+    unreliable across platforms.)
     """
-    hfr_low  = high_freq_ratio(render(plugin, [48], cutoff_hz=200,   waveform=1))
-    hfr_high = high_freq_ratio(render(plugin, [48], cutoff_hz=18000, waveform=1))
+    thresh = 1500.0
+    hfr_low  = high_freq_ratio(render(plugin, [48], cutoff_hz=200,   waveform=1), thresh)
+    hfr_high = high_freq_ratio(render(plugin, [48], cutoff_hz=18000, waveform=1), thresh)
     assert hfr_low < hfr_high * 0.5, (
-        f"Filter not attenuating — HFR: cutoff=200Hz:{hfr_low:.4f}  "
+        f"Filter not attenuating — HFR @1.5kHz: cutoff=200Hz:{hfr_low:.4f}  "
         f"cutoff=18kHz:{hfr_high:.4f}"
     )
-    return f"HFR  200Hz={hfr_low:.4f}  18kHz={hfr_high:.4f}"
+    return f"HFR@1.5kHz  200Hz={hfr_low:.4f}  18kHz={hfr_high:.4f}"
 
 
 def test_waveforms(plugin):
