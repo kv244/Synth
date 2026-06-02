@@ -4,6 +4,10 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build-installer:
@@ -51,10 +55,8 @@ jobs:
 
       - name: Extract version from tag
         id: version
-        shell: pwsh
-        run: |
-          $v = "${{ github.ref_name }}" -replace '^v', ''
-          "tag=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+        shell: bash
+        run: echo "tag=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
       - name: Build installer
         shell: pwsh
@@ -67,6 +69,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           name: "Neon Synth ${{ github.ref_name }}"
+          tag_name: ${{ github.ref_name }}
           body: |
             ## Neon Synth ${{ github.ref_name }}
             **Author:** Razvan Julian Petrescu / AudioDSP
@@ -87,5 +90,3 @@ jobs:
             ### What's new
           files: NeonSynth-${{ steps.version.outputs.tag }}-Windows-Setup.exe
           generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
