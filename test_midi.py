@@ -94,13 +94,12 @@ def set_params(plugin, cutoff_hz: float = 2000.0, waveform: int = 0,
 
 
 def make_msgs(notes: list[int], velocity: int, note_dur_s: float) -> list:
-    """Build mido note-on / note-off messages. Time is in samples."""
+    """Build mido note-on / note-off messages. Time is in seconds."""
     msgs = []
     for note in notes:
-        msgs.append(mido.Message("note_on",  note=note, velocity=velocity, time=0))
-    off_sample = int(note_dur_s * SAMPLE_RATE)
+        msgs.append(mido.Message("note_on",  note=note, velocity=velocity, time=0.0))
     for note in notes:
-        msgs.append(mido.Message("note_off", note=note, velocity=0, time=off_sample))
+        msgs.append(mido.Message("note_off", note=note, velocity=0, time=note_dur_s))
     return msgs
 
 
@@ -174,8 +173,8 @@ def test_release_tail(plugin):
     """Audio persists ~300 ms after note-off (tail-off implementation check)."""
     set_params(plugin)
     msgs = [
-        mido.Message("note_on",  note=60, velocity=100, time=0),
-        mido.Message("note_off", note=60, velocity=0,   time=int(0.5 * SAMPLE_RATE)),
+        mido.Message("note_on",  note=60, velocity=100, time=0.0),
+        mido.Message("note_off", note=60, velocity=0,   time=0.5),
     ]
     audio = plugin.process(msgs, 1.5, SAMPLE_RATE, reset=True)
 
@@ -254,7 +253,7 @@ def demo_render(plugin) -> np.ndarray:
     # Sawtooth + ~1 kHz cutoff gives a warm, analog character vs chiptune square
     set_params(plugin, cutoff_hz=1100, waveform=3)
     notes      = [60, 64, 67, 72, 67, 64, 60]
-    note_dur   = int(0.38 * SAMPLE_RATE)   # longer notes, slight overlap
+    note_dur_s = 0.38                      # note duration in seconds
     gap        = int(0.32 * SAMPLE_RATE)
     chunk_dur  = 0.9                        # enough room for release tail
     total_secs = gap * len(notes) / SAMPLE_RATE + chunk_dur
@@ -262,8 +261,8 @@ def demo_render(plugin) -> np.ndarray:
     for i, note in enumerate(notes):
         offset = i * gap
         msgs = [
-            mido.Message("note_on",  note=note, velocity=100, time=0),
-            mido.Message("note_off", note=note, velocity=0,   time=note_dur),
+            mido.Message("note_on",  note=note, velocity=100, time=0.0),
+            mido.Message("note_off", note=note, velocity=0,   time=note_dur_s),
         ]
         chunk = plugin.process(msgs, chunk_dur, SAMPLE_RATE, reset=True)
         end = min(offset + chunk.shape[1], total.shape[1])

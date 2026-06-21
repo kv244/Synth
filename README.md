@@ -115,16 +115,16 @@ Expected output:
 
 ```
 Loading plugin …
-Parameters: ['waveform', 'cutoff', 'filterEnabled', 'bypass']
+Parameters: ['waveform', 'cutoff', 'filter_enabled', 'attack', 'decay', 'sustain', 'release', 'bypass']
 
-  PASS  Single note             RMS=0.5038
-  PASS  Polyphony (4ch)         single=0.5038  chord=1.0947
-  PASS  Polyphony (8ch)         RMS=1.5011
-  PASS  Voice stealing          RMS=1.4997
-  PASS  Release tail            tail RMS=0.488542
-  PASS  Filter cutoff           HFR  200Hz=0.0064  18kHz=0.0130
-  PASS  Waveforms               Sine=0.0000  Square=0.0266  Triangle=0.0001  Sawtooth=0.0040
-  PASS  Velocity scaling        vel20=0.1523  vel120=0.6112
+  PASS  Single note             RMS=0.2747
+  PASS  Polyphony (4ch)         single=0.2747  chord=0.6365
+  PASS  Polyphony (8ch)         RMS=0.8984
+  PASS  Voice stealing          RMS=0.8943
+  PASS  Release tail            tail RMS=0.183607
+  PASS  Filter cutoff           HFR@1.5kHz  200Hz=0.0000  18kHz=0.0409
+  PASS  Waveforms               Sine=0.0000  Square=0.0331  Triangle=0.0001  Sawtooth=0.0446
+  PASS  Velocity scaling        vel20=0.1256  vel120=0.3351
 
 8/8 passed
 ```
@@ -179,11 +179,10 @@ plugin = pedalboard.load_plugin(VST3)
 plugin.parameters["cutoff"].raw_value  = (500 - 20) / (20000 - 20)   # ~500 Hz
 plugin.parameters["waveform"].raw_value = 1 / 3                        # Square
 
-# Build MIDI messages (time field = sample offset)
-SR = 44100
+# Build MIDI messages (time field = offset in seconds)
 msgs = [
-    mido.Message("note_on",  note=60, velocity=100, time=0),
-    mido.Message("note_off", note=60, velocity=0,   time=int(1.0 * SR)),
+    mido.Message("note_on",  note=60, velocity=100, time=0.0),
+    mido.Message("note_off", note=60, velocity=0,   time=1.0),
 ]
 
 # Render 2 seconds of audio → numpy array (channels, samples)
@@ -197,9 +196,9 @@ print(audio.shape, audio.max())
 chord = [60, 64, 67, 72]   # C major
 msgs  = []
 for note in chord:
-    msgs.append(mido.Message("note_on",  note=note, velocity=90, time=0))
+    msgs.append(mido.Message("note_on",  note=note, velocity=90, time=0.0))
 for note in chord:
-    msgs.append(mido.Message("note_off", note=note, velocity=0,  time=int(1.5 * SR)))
+    msgs.append(mido.Message("note_off", note=note, velocity=0,  time=1.5))
 
 audio = plugin.process(msgs, 2.5, SR, reset=True)
 ```
