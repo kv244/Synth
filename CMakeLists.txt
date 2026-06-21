@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(BasicSynth VERSION 1.0.0 LANGUAGES C CXX)
+project(BasicSynth VERSION 1.0.1 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -11,7 +11,7 @@ endif()
 add_subdirectory("${JUCE_DIR}" "${CMAKE_BINARY_DIR}/JUCE")
 
 juce_add_plugin(BasicSynth
-    VERSION                     1.0.0
+    VERSION                     1.0.1
     COMPANY_NAME                "AudioDSP"
     COMPANY_WEBSITE             "https://audiodsp.com"
     BUNDLE_ID                   "com.audiodsp.basicsynth"
