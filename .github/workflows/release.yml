@@ -2,6 +2,9 @@ name: Release
 
 on:
   push:
+    branches:
+      - master
+      - main
     tags:
       - 'v*'
   workflow_dispatch:
@@ -53,10 +56,16 @@ jobs:
       - name: Install NSIS
         run: choco install nsis -y --no-progress
 
-      - name: Extract version from tag
+      - name: Extract version
         id: version
         shell: bash
-        run: echo "tag=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            TAG_VERSION="${GITHUB_REF_NAME#v}"
+          else
+            TAG_VERSION=$(python -c "import re; text=open('CMakeLists.txt').read(); m=re.search(r'project\(BasicSynth VERSION\s+(\d+\.\d+\.\d+)', text); print(m.group(1))")
+          fi
+          echo "tag=${TAG_VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Build installer
         shell: pwsh
@@ -68,10 +77,10 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: "Neon Synth ${{ github.ref_name }}"
-          tag_name: ${{ github.ref_name }}
+          name: "Neon Synth v${{ steps.version.outputs.tag }}"
+          tag_name: "v${{ steps.version.outputs.tag }}"
           body: |
-            ## Neon Synth ${{ github.ref_name }}
+            ## Neon Synth v${{ steps.version.outputs.tag }}
             **Author:** Razvan Julian Petrescu / AudioDSP
 
             ### Installation
