@@ -17,6 +17,7 @@ by **Razvan Julian Petrescu** / **AudioDSP**.
 - **Post-filter waveform display** — live output visualiser in the UI
 - **Custom neon GUI** — background image, cyan/magenta controls
 - **MIDI** — works with any MIDI controller or keyboard
+- **MIDI Logging** — optional real-time logging of received MIDI messages to a file (`--midilog <file>`)
 - **DAW automation** — all parameters are automatable in VST3 hosts
 
 ---
@@ -76,6 +77,11 @@ cmake --build build --config Release
 
 Run `BasicSynth.exe`. Click **Options → Audio/MIDI Settings** to select your
 audio output and MIDI input device, then play from any connected MIDI keyboard.
+
+You can also launch the standalone application with the `--midilog <file>` parameter to log real-time MIDI input:
+```bash
+BasicSynth.exe --midilog log.txt
+```
 
 ### VST3
 
@@ -147,6 +153,30 @@ python test_midi.py --play --save output.wav
 
 The demo renders a C major arpeggio with a sawtooth oscillator and a 1.1 kHz
 filter cutoff — warm and analog rather than chiptune.
+
+### MIDI Logging
+
+You can enable logging of all received MIDI messages (with high-resolution timestamps in seconds relative to the start of processing) to a text file by passing the `--midilog <file>` option:
+
+```bash
+# Log MIDI events to a file during testing
+python test_midi.py --midilog log.txt
+```
+
+> [!NOTE]
+> On Windows, when a relative path like `log.txt` is passed, the file is created relative to the VST3 plugin binary's location within the build folder (e.g. `build/BasicSynth_artefacts/Release/VST3/BasicSynth.vst3/Contents/x86_64-win/log.txt`). To write to a specific directory (like the repository root), provide an absolute path:
+>
+> ```bash
+> python test_midi.py --midilog C:\path\to\your\synth\log.txt
+> ```
+
+Example log output:
+```text
+[0.025s] Note on C3 Velocity 127 Channel 1
+[0.028s] All notes off Channel 1
+[0.029s] Note on C3 Velocity 120 Channel 1
+[0.118s] Note off C3 Velocity 0 Channel 1
+```
 
 ### What each test checks
 
