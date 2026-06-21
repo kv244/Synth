@@ -6,6 +6,7 @@ class BasicSynthAudioProcessor : public juce::AudioProcessor
 {
 public:
     BasicSynthAudioProcessor();
+    ~BasicSynthAudioProcessor() override;
 
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages) override;
@@ -39,6 +40,12 @@ public:
     juce::AudioVisualiserComponent waveformVisualiser { 2 };
 
 private:
+
+    juce::File midiLogFile;
+    std::unique_ptr<juce::FileOutputStream> midiLogStream;
+    bool loggingEnabled = false;
+    double startTime = 0.0;
+
     juce::Synthesiser synth;
     juce::AudioProcessorValueTreeState apvts;
 

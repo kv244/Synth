@@ -1,6 +1,12 @@
 #include "BasicSynthProcessor.h"
 #include "BasicSynthEditor.h"
 
+#if JUCE_WINDOWS
+ #define NOMINMAX
+ #define WIN32_LEAN_AND_MEAN
+ #include <windows.h>
+#endif
+
 juce::AudioProcessorValueTreeState::ParameterLayout BasicSynthAudioProcessor::createParameterLayout()
 {
     juce::AudioProcessorValueTreeState::ParameterLayout layout;
@@ -37,6 +43,39 @@ BasicSynthAudioProcessor::BasicSynthAudioProcessor()
     decayParameter         = dynamic_cast<juce::AudioParameterFloat*> (apvts.getParameter ("decay"));
     sustainParameter       = dynamic_cast<juce::AudioParameterFloat*> (apvts.getParameter ("sustain"));
     releaseParameter       = dynamic_cast<juce::AudioParameterFloat*> (apvts.getParameter ("release"));
+
+    // Parse command line arguments for --midilog
+   #if JUCE_WINDOWS
+    juce::String cmdLine (GetCommandLineW());
+   #else
+    juce::String cmdLine = juce::JUCEApplicationBase::getCommandLineParameters();
+   #endif
+    int idx = cmdLine.indexOf ("--midilog");
+    if (idx != -1)
+    {
+        auto logFileStr = cmdLine.substring (idx + 9).trim();
+        int spaceIdx = logFileStr.indexOfChar (' ');
+        if (spaceIdx != -1)
+            logFileStr = logFileStr.substring (0, spaceIdx);
+
+        logFileStr = logFileStr.unquoted();
+
+        if (logFileStr.isNotEmpty())
+        {
+            midiLogFile = juce::File::getCurrentWorkingDirectory().getChildFile (logFileStr);
+            midiLogFile.deleteFile();
+            midiLogStream = midiLogFile.createOutputStream();
+            if (midiLogStream != nullptr && midiLogStream->openedOk())
+            {
+                loggingEnabled = true;
+                startTime = juce::Time::getMillisecondCounterHiRes() * 0.001;
+            }
+        }
+    }
+}
+
+BasicSynthAudioProcessor::~BasicSynthAudioProcessor()
+{
 }
 
 void BasicSynthAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
@@ -52,6 +91,26 @@ void BasicSynthAudioProcessor::prepareToPlay (double sampleRate, int samplesPerB
 void BasicSynthAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
 {
     buffer.clear();
+
+    if (loggingEnabled && !midiMessages.isEmpty() && midiLogStream != nullptr)
+    {
+        double sampleRate = getSampleRate();
+        if (sampleRate <= 0.0) sampleRate = 44100.0;
+        double blockStartTime = juce::Time::getMillisecondCounterHiRes() * 0.001 - startTime;
+
+        for (const auto metadata : midiMessages)
+        {
+            auto msg = metadata.getMessage();
+            double eventTime = blockStartTime + (double) metadata.samplePosition / sampleRate;
+            juce::String timeStr = juce::String::formatted ("%.3f", eventTime);
+            juce::String desc = msg.getDescription();
+            if (desc.isEmpty())
+                desc = "Raw Bytes: " + juce::String::toHexString (msg.getRawData(), msg.getRawDataSize());
+
+            midiLogStream->writeString ("[" + timeStr + "s] " + desc + "\n");
+        }
+        midiLogStream->flush();
+    }
 
     int   waveform      = waveformParameter->get();
     float cutoff        = cutoffParameter->get();
@@ -97,3 +156,5 @@ juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 {
     return new BasicSynthAudioProcessor();
 }
+
+

@@ -276,6 +276,8 @@ def main():
                         help="render a demo and play it through speakers")
     parser.add_argument("--save", metavar="FILE",
                         help="render a demo and save it to a WAV file")
+    parser.add_argument("--midilog", metavar="FILE",
+                        help="path to write midi logs (processed by plugin)")
     args = parser.parse_args()
 
     if not os.path.exists(VST3_PATH):
