@@ -180,6 +180,26 @@ Example log output:
 [0.118s] Note off C3 Velocity 0 Channel 1
 ```
 
+> [!NOTE]
+> Logging writes raw UTF-8 text via `OutputStream::write()`. Earlier builds used
+> `OutputStream::writeString()`, which null-terminates every call and left a stray
+> `\0` byte glued to the front of each line after the first — logs captured with
+> those builds still parse fine with `log_to_midi.py` below, which strips them.
+
+### Converting a log to a .mid file
+
+`log_to_midi.py` turns a captured `midi.log` into a Standard MIDI File that
+Windows Media Player, a DAW, or a notation app can open directly:
+
+```bash
+python log_to_midi.py build/BasicSynth_artefacts/Release/Standalone/midi.log
+# writes midi.mid next to the input file
+```
+
+Pass an explicit output path as a second argument to override the default.
+Note on/off pairs and "All notes off" are converted to proper MIDI events at
+a fixed 120 BPM tempo, with real time preserved via tick timing.
+
 ### What each test checks
 
 | Test | What it verifies |

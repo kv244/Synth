@@ -107,7 +107,8 @@ void BasicSynthAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, j
             if (desc.isEmpty())
                 desc = "Raw Bytes: " + juce::String::toHexString (msg.getRawData(), msg.getRawDataSize());
 
-            midiLogStream->writeString ("[" + timeStr + "s] " + desc + "\n");
+            juce::String line = "[" + timeStr + "s] " + desc + "\n";
+            midiLogStream->write (line.toRawUTF8(), line.getNumBytesAsUTF8());
         }
         midiLogStream->flush();
     }
