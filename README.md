@@ -8,6 +8,8 @@
 A futuristic, neon-styled virtual analog synthesizer built with JUCE and C++17,
 by **Razvan Julian Petrescu** / **AudioDSP**.
 
+![Neon Synth screenshot](screenshot.png)
+
 ## Features
 
 - **4 Waveforms** — Sine, Square, Triangle, Sawtooth
