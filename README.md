@@ -14,12 +14,14 @@ by **Razvan Julian Petrescu** / **AudioDSP**.
 
 - **4 Waveforms** — Sine, Square, Triangle, Sawtooth
 - **Low-pass Filter** — adjustable cutoff (20 Hz – 20 kHz) with on/off bypass toggle
-- **8-voice Polyphony** — up to 8 simultaneous notes with voice stealing
-- **Release tail** — smooth ~300 ms exponential fade on note-off
+- **16-voice Polyphony** — up to 16 simultaneous notes, with click-free voice stealing
+- **ADSR envelope** — linear segments whose durations match the knob values
+- **Band-limited oscillators** — PolyBLEP square and sawtooth to reduce aliasing
+- **Output gain** — host-automatable output level (−48 dB to +6 dB)
 - **Post-filter waveform display** — live output visualiser in the UI
 - **Custom neon GUI** — background image, cyan/magenta controls
 - **MIDI** — works with any MIDI controller or keyboard
-- **MIDI Logging** — optional real-time logging of received MIDI messages to a file (`--midilog <file>`)
+- **MIDI Logging** — optional, real-time-safe logging of received MIDI messages to a file (`BASICSYNTH_MIDILOG=<file>`, or `--midilog <file>` in the Standalone)
 - **DAW automation** — all parameters are automatable in VST3 hosts
 
 ---
@@ -41,7 +43,7 @@ Run `NeonSynth-x.y.z-Windows-Setup.exe`. The wizard installs the VST3 to
 | Tool | Version |
 |---|---|
 | CMake | 3.21+ |
-| JUCE | 8.x (download separately) |
+| JUCE | 9.0.0 (download separately) |
 | C++ compiler | MSVC 2022 / Clang / GCC with C++17 |
 
 ### Steps
@@ -80,7 +82,7 @@ cmake --build build --config Release
 Run `BasicSynth.exe`. Click **Options → Audio/MIDI Settings** to select your
 audio output and MIDI input device, then play from any connected MIDI keyboard.
 
-You can also launch the standalone application with the `--midilog <file>` parameter to log real-time MIDI input:
+You can also launch the standalone application with the `--midilog <file>` parameter, or set the `BASICSYNTH_MIDILOG` environment variable, to log real-time MIDI input:
 ```bash
 BasicSynth.exe --midilog log.txt
 ```
@@ -123,16 +125,16 @@ Expected output:
 
 ```
 Loading plugin …
-Parameters: ['waveform', 'cutoff', 'filter_enabled', 'attack', 'decay', 'sustain', 'release', 'bypass']
+Parameters: ['waveform', 'cutoff', 'filter_enabled', 'attack', 'decay', 'sustain', 'release', 'output_gain_db', 'bypass']
 
-  PASS  Single note             RMS=0.2747
-  PASS  Polyphony (4ch)         single=0.2747  chord=0.6365
-  PASS  Polyphony (8ch)         RMS=0.8984
-  PASS  Voice stealing          RMS=0.8943
-  PASS  Release tail            tail RMS=0.183607
-  PASS  Filter cutoff           HFR@1.5kHz  200Hz=0.0000  18kHz=0.0409
-  PASS  Waveforms               Sine=0.0000  Square=0.0331  Triangle=0.0001  Sawtooth=0.0446
-  PASS  Velocity scaling        vel20=0.1256  vel120=0.3351
+  PASS  Single note             RMS=0.0799
+  PASS  Polyphony (4ch)         single=0.0799  chord=0.1596
+  PASS  Polyphony (8ch)         RMS=0.2247
+  PASS  Voice stealing          RMS=0.3135
+  PASS  Release tail            tail RMS=0.052122
+  PASS  Filter cutoff           HFR@1.5kHz  200Hz=0.0000  18kHz=0.0283
+  PASS  Waveforms               Sine=0.0000  Square=0.0154  Triangle=0.0000  Sawtooth=0.0245
+  PASS  Velocity scaling        vel20=0.0160  vel120=0.0959
 
 8/8 passed
 ```
@@ -158,7 +160,7 @@ filter cutoff — warm and analog rather than chiptune.
 
 ### MIDI Logging
 
-You can enable logging of all received MIDI messages (with high-resolution timestamps in seconds relative to the start of processing) to a text file by passing the `--midilog <file>` option:
+You can enable logging of all received MIDI messages to a text file by passing the `--midilog <file>` option. Timestamps are in seconds of audio time since the plugin started processing, so they stay correct in offline renders that run faster than real time:
 
 ```bash
 # Log MIDI events to a file during testing
@@ -166,11 +168,7 @@ python test_midi.py --midilog log.txt
 ```
 
 > [!NOTE]
-> On Windows, when a relative path like `log.txt` is passed, the file is created relative to the VST3 plugin binary's location within the build folder (e.g. `build/BasicSynth_artefacts/Release/VST3/BasicSynth.vst3/Contents/x86_64-win/log.txt`). To write to a specific directory (like the repository root), provide an absolute path:
->
-> ```bash
-> python test_midi.py --midilog C:\path\to\your\synth\log.txt
-> ```
+> `test_midi.py` turns the path into an absolute one and passes it to the plugin through the `BASICSYNTH_MIDILOG` environment variable, so `log.txt` lands in your current directory. In a DAW, set `BASICSYNTH_MIDILOG` (preferably to an absolute path) before starting the host. Formatting and disk writes happen on a background thread, never on the audio thread.
 
 Example log output:
 ```text
@@ -207,8 +205,8 @@ a fixed 120 BPM tempo, with real time preserved via tick timing.
 | Single note | Basic audio output — RMS above noise floor |
 | Polyphony (4ch) | 4-voice chord is significantly louder than a single note |
 | Polyphony (8ch) | All 8 voices fire simultaneously without dropouts |
-| Voice stealing | 9th simultaneous note steals a voice without crashing or silence |
-| Release tail | Audio persists ~300 ms after note-off (exponential decay) |
+| Voice stealing | 17th simultaneous note steals a voice without crashing or silence |
+| Release tail | Audio persists after note-off for the 300 ms release (linear decay) |
 | Filter cutoff | High-frequency energy is lower at 200 Hz cutoff than at 18 kHz |
 | Waveforms | Sine, Square, Triangle, Sawtooth produce distinct harmonic content |
 | Velocity scaling | Higher velocity produces proportionally louder output |

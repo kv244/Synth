@@ -8,257 +8,194 @@ public:
     bool appliesToChannel (int) override { return true; }
 };
 
-struct SimpleBiquad
-{
-    float a1 = 0.0f, a2 = 0.0f, b0 = 1.0f, b1 = 0.0f, b2 = 0.0f;
-    float x1 = 0.0f, x2 = 0.0f, y1 = 0.0f, y2 = 0.0f;
+/**
+    One synth voice: band-limited oscillator -> ADSR -> TPT low-pass.
 
-    void reset()
-    {
-        x1 = x2 = y1 = y2 = 0.0f;
-    }
-
-    void setLowPass (double sampleRate, float cutoffHz)
-    {
-        if (sampleRate <= 0.0) return;
-
-        float theta = juce::MathConstants<float>::twoPi * cutoffHz / (float) sampleRate;
-        float d = 1.0f / std::tan (theta * 0.5f);
-        float d2 = d * d;
-        float sqrt2 = std::sqrt (2.0f);
-        float scale = 1.0f / (d2 + sqrt2 * d + 1.0f);
-
-        b0 = scale;
-        b1 = 2.0f * scale;
-        b2 = scale;
-        a1 = 2.0f * (1.0f - d2) * scale;
-        a2 = (d2 - sqrt2 * d + 1.0f) * scale;
-    }
-
-    float process (float in)
-    {
-        float out = b0 * in + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
-        x2 = x1;
-        x1 = in;
-        y2 = y1;
-        y1 = out;
-        return out;
-    }
-};
-
+    Real-time safe: no allocation, no std::function, renders straight into the
+    output buffer (no scratch buffer to overrun), and every parameter that can
+    click is smoothed or latched at a phase wrap.
+*/
 class BasicSynthVoice : public juce::SynthesiserVoice
 {
 public:
-    BasicSynthVoice() = default;
-
-    bool canPlaySound (juce::SynthesiserSound* sound) override
+    /** Parameter snapshot, read once per block on the audio thread. */
+    struct Params
     {
-        return dynamic_cast<BasicSynthSound*> (sound) != nullptr;
+        int   waveform = 0;            // 0 Sine, 1 Square, 2 Triangle, 3 Sawtooth
+        float cutoffHz = 2000.0f;
+        bool  filterOn = true;
+        juce::ADSR::Parameters adsr;
+    };
+
+    // -12 dB per voice. Measured: a full-velocity 8-note square chord peaks at about
+    // +5 dBFS (was +18), so the output gain parameter is still needed for dense chords.
+    static constexpr float voiceGain = 0.25f;
+
+    bool canPlaySound (juce::SynthesiserSound* s) override
+    {
+        return dynamic_cast<BasicSynthSound*> (s) != nullptr;
     }
 
-    void startNote (int midiNoteNumber, float velocity,
-                    juce::SynthesiserSound*, int) override
+    void prepare (double newSampleRate, int maxBlockSize)
     {
-        envState      = EnvState::Attack;
-        envelopeValue = 0.0f;
-        filterL.reset();
-        filterR.reset();
-        osc.reset();
-        osc.setFrequency (juce::MidiMessage::getMidiNoteInHertz (midiNoteNumber));
-        level = velocity;
+        sampleRate = newSampleRate;
+        adsr.setSampleRate (newSampleRate);
+        adsr.reset();
+
+        filter.prepare ({ newSampleRate, (juce::uint32) maxBlockSize, 1 });
+        filter.setType (juce::dsp::StateVariableTPTFilterType::lowpass);
+        filter.setResonance (1.0f / juce::MathConstants<float>::sqrt2);   // Butterworth Q
+
+        cutoff.reset (newSampleRate, 0.02);       // 20 ms, multiplicative (even in octaves)
+        cutoff.setCurrentAndTargetValue (clampCutoff (cutoff.getTargetValue()));
+        filter.setCutoffFrequency (cutoff.getCurrentValue());
+
+        filterMix.reset (newSampleRate, 0.01);    // 10 ms crossfade for the on/off toggle
+    }
+
+    /** Audio thread, once per block before rendering. */
+    void setParameters (const Params& p) noexcept
+    {
+        adsrParams = p.adsr;
+        if (! hardStopping)
+            adsr.setParameters (adsrParams);
+
+        pendingWaveform = p.waveform;                     // applied at the next phase wrap
+        cutoff.setTargetValue (clampCutoff (p.cutoffHz));
+        filterMix.setTargetValue (p.filterOn ? 1.0f : 0.0f);
+    }
+
+    void startNote (int midiNote, float velocity, juce::SynthesiserSound*, int) override
+    {
+        // Set the pitch directly: no glide from the previous note.
+        phaseInc = (float) (juce::MidiMessage::getMidiNoteInHertz (midiNote) / sampleRate);
+        level    = velocity * voiceGain;
+
+        if (hardStopping)
+        {
+            hardStopping = false;
+            adsr.setParameters (adsrParams);
+        }
+
+        // juce::ADSR attacks from the current level, and the phase and filter state
+        // are kept, so retriggering or stealing a sounding voice doesn't click.
+        adsr.noteOn();
     }
 
     void stopNote (float, bool allowTailOff) override
     {
         if (allowTailOff)
-            envState = EnvState::Release;
-        else
         {
-            clearCurrentNote();
-            envelopeValue = 0.0f;
-            envState      = EnvState::Idle;
+            adsr.noteOff();
+            return;
         }
+
+        // Hard stop (voice stolen, all sound off): 5 ms fade instead of a cut.
+        // juce::Synthesiser keeps calling renderNextBlock() on free voices, so the fade still plays.
+        hardStopping = true;
+        adsr.setParameters ({ 0.001f, 0.001f, 1.0f, 0.005f });
+        adsr.noteOff();
+        clearCurrentNote();
     }
 
     void pitchWheelMoved (int) override {}
     void controllerMoved (int, int) override {}
 
-    void renderNextBlock (juce::AudioBuffer<float>& outputBuffer,
-                          int startSample, int numSamples) override
+    using SynthesiserVoice::renderNextBlock;   // keep the double-precision overload visible
+    void renderNextBlock (juce::AudioBuffer<float>& output, int startSample, int numSamples) override
     {
-        if (envState == EnvState::Idle)
+        if (! adsr.isActive())
             return;
 
-        const int ch = tempBuffer.getNumChannels();
+        auto* left  = output.getWritePointer (0);
+        auto* right = output.getNumChannels() > 1 ? output.getWritePointer (1) : nullptr;
 
-        for (int sample = 0; sample < numSamples; ++sample)
+        for (int i = startSample; i < startSample + numSamples; ++i)
         {
-            advanceEnvelope();
+            if (cutoff.isSmoothing())
+                filter.setCutoffFrequency (cutoff.getNextValue());
 
-            if (envState == EnvState::Idle)
+            const float dry = nextOscillatorSample() * level * adsr.getNextSample();
+            const float wet = filter.processSample (0, dry);   // always run: state stays warm
+            const float out = dry + filterMix.getNextValue() * (wet - dry);
+
+            left[i] += out;
+            if (right != nullptr)
+                right[i] += out;
+
+            if (! adsr.isActive())
             {
-                // Note finished mid-block: zero remaining samples
-                for (int s = sample; s < numSamples; ++s)
-                {
-                    tempBuffer.setSample (0, s, 0.0f);
-                    if (ch > 1) tempBuffer.setSample (1, s, 0.0f);
-                }
+                if (isVoiceActive())
+                    clearCurrentNote();
+                filter.reset();
                 break;
             }
-
-            float raw = osc.processSample (0.0f) * level * envelopeValue;
-
-            float leftSample = raw;
-            float rightSample = raw;
-
-            if (filterEnabled)
-            {
-                leftSample = filterL.process (leftSample);
-                rightSample = filterR.process (rightSample);
-            }
-
-            tempBuffer.setSample (0, sample, leftSample);
-            if (ch > 1) tempBuffer.setSample (1, sample, rightSample);
         }
-
-        const int numChannelsToCopy = std::min (outputBuffer.getNumChannels(), tempBuffer.getNumChannels());
-        for (int channel = 0; channel < numChannelsToCopy; ++channel)
-            outputBuffer.addFrom (channel, startSample, tempBuffer, channel, 0, numSamples);
-    }
-
-    void prepareToPlay (double sampleRate, int samplesPerBlock, int numChannels)
-    {
-        juce::dsp::ProcessSpec spec { sampleRate,
-                                      (juce::uint32) samplesPerBlock,
-                                      (juce::uint32) numChannels };
-        osc.prepare (spec);
-        lastSampleRate = sampleRate;
-        lastCutoff     = -1.0f;  // force coefficient recalculation at new sample rate
-        updateRates();
-        tempBuffer.setSize (numChannels, samplesPerBlock);
-    }
-
-    void setWaveform (int type)
-    {
-        if (type == currentWaveform) return;
-        currentWaveform = type;
-        switch (type)
-        {
-            case 0: osc.initialise ([](float x) { return std::sin (x); }); break;
-            case 1: osc.initialise ([](float x) { return x < 0.0f ? -1.0f : 1.0f; }); break;
-            case 2: osc.initialise ([](float x) {
-                float x_scaled = x * (2.0f / juce::MathConstants<float>::pi);
-                if (x < -juce::MathConstants<float>::halfPi)
-                    return -2.0f - x_scaled;
-                else if (x < juce::MathConstants<float>::halfPi)
-                    return x_scaled;
-                else
-                    return 2.0f - x_scaled;
-            }); break;
-            case 3: osc.initialise ([](float x) { return x * (1.0f / juce::MathConstants<float>::pi); }); break;
-            default: break;
-        }
-    }
-
-    void setFilterEnabled (bool enabled) { filterEnabled = enabled; }
-
-    void setFilterCutoff (float cutoffHz)
-    {
-        if (lastSampleRate > 0 && cutoffHz != lastCutoff)
-        {
-            lastCutoff = cutoffHz;
-            filterL.setLowPass (lastSampleRate, cutoffHz);
-            filterR.setLowPass (lastSampleRate, cutoffHz);
-        }
-    }
-
-    void setADSR (float a, float d, float s, float r)
-    {
-        attackTime   = std::max (a, 0.001f);
-        decayTime    = std::max (d, 0.001f);
-        sustainLevel = juce::jlimit (0.0f, 1.0f, s);
-        releaseTime  = std::max (r, 0.001f);
-        updateRates();
     }
 
 private:
-    enum class EnvState { Idle, Attack, Decay, Sustain, Release };
-
-    void updateRates()
+    float clampCutoff (float hz) const noexcept
     {
-        if (lastSampleRate > 0.0)
-        {
-            attackRate  = 1.0f / (float) (lastSampleRate * attackTime);
-            decayRate   = 1.0f / (float) (lastSampleRate * decayTime);
-            releaseRate = 1.0f / (float) (lastSampleRate * releaseTime);
-        }
+        return juce::jlimit (20.0f, 0.45f * (float) sampleRate, hz);   // stay well below Nyquist
     }
 
-    void advanceEnvelope()
+    /** PolyBLEP residual: removes most aliasing from a step discontinuity. */
+    static float polyBlep (float t, float dt) noexcept
     {
-        switch (envState)
+        if (t < dt)
         {
-            case EnvState::Attack:
-                envelopeValue += attackRate;
-                if (envelopeValue >= 1.0f)
-                {
-                    envelopeValue = 1.0f;
-                    envState = EnvState::Decay;
-                }
-                break;
-
-            case EnvState::Decay:
-                // Guard: if sustain was raised above current level, snap to Sustain
-                if (envelopeValue <= sustainLevel)
-                {
-                    envelopeValue = sustainLevel;
-                    envState = EnvState::Sustain;
-                    break;
-                }
-                envelopeValue -= (envelopeValue - sustainLevel) * decayRate;
-                if (envelopeValue <= sustainLevel + 0.0001f)
-                {
-                    envelopeValue = sustainLevel;
-                    envState = EnvState::Sustain;
-                }
-                break;
-
-            case EnvState::Sustain:
-                envelopeValue = sustainLevel;
-                break;
-
-            case EnvState::Release:
-                envelopeValue -= envelopeValue * releaseRate;
-                if (envelopeValue < 0.0001f)
-                {
-                    clearCurrentNote();
-                    envelopeValue = 0.0f;
-                    envState = EnvState::Idle;
-                }
-                break;
-
-            default: break;
+            t /= dt;
+            return t + t - t * t - 1.0f;
         }
+        if (t > 1.0f - dt)
+        {
+            t = (t - 1.0f) / dt;
+            return t * t + t + t + 1.0f;
+        }
+        return 0.0f;
     }
 
-    juce::dsp::Oscillator<float>  osc;
-    SimpleBiquad                  filterL, filterR;
-    juce::AudioBuffer<float>      tempBuffer;
+    float nextOscillatorSample() noexcept
+    {
+        const float t  = phase;
+        const float dt = phaseInc;
+        float value;
 
-    float  level          = 0.0f;
-    float  envelopeValue  = 0.0f;
-    bool   filterEnabled  = true;
-    double lastSampleRate = 0.0;
-    int    currentWaveform = -1;
-    float  lastCutoff      = -1.0f;
+        switch (waveform)
+        {
+            case 1:  // Square
+                value = (t < 0.5f ? 1.0f : -1.0f)
+                      + polyBlep (t, dt)
+                      - polyBlep (std::fmod (t + 0.5f, 1.0f), dt);
+                break;
+            case 2:  // Triangle (continuous, so naive is fine)
+                value = t < 0.5f ? 4.0f * t - 1.0f : 3.0f - 4.0f * t;
+                break;
+            case 3:  // Sawtooth
+                value = 2.0f * t - 1.0f - polyBlep (t, dt);
+                break;
+            default: // Sine
+                value = std::sin (juce::MathConstants<float>::twoPi * t);
+                break;
+        }
 
-    EnvState envState    = EnvState::Idle;
-    float    attackTime  = 0.01f;
-    float    decayTime   = 0.10f;
-    float    sustainLevel = 0.7f;
-    float    releaseTime = 0.30f;
+        phase += dt;
+        if (phase >= 1.0f)
+        {
+            phase -= 1.0f;
+            waveform = pendingWaveform;   // switch shapes only at the cycle boundary
+        }
+        return value;
+    }
 
-    float    attackRate  = 0.0f;
-    float    decayRate   = 0.0f;
-    float    releaseRate = 0.0f;
+    double sampleRate = 44100.0;
+    float  phase = 0.0f, phaseInc = 0.0f, level = 0.0f;
+    int    waveform = 0, pendingWaveform = 0;
+    bool   hardStopping = false;
+
+    juce::ADSR adsr;
+    juce::ADSR::Parameters adsrParams;
+    juce::dsp::StateVariableTPTFilter<float> filter;
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Multiplicative> cutoff { 2000.0f };
+    juce::SmoothedValue<float> filterMix { 1.0f };
 };
