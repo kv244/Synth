@@ -3,8 +3,6 @@
 
 namespace
 {
-    constexpr int numVoices = 16;
-
     /** Log path from BASICSYNTH_MIDILOG, or (Standalone only) from "--midilog <file>". */
     juce::String findMidiLogPath (juce::AudioProcessor::WrapperType wrapper)
     {
@@ -57,6 +55,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout BasicSynthAudioProcessor::cr
 
     layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "gain", 1 }, "Output Gain (dB)",
                                                         NormalisableRange<float> (-48.0f, 6.0f, 0.1f), 0.0f));
+
+    // Stereo spread of voices by pitch: 0 = mono, 1 = notes two octaves from middle C hard-panned.
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "width", 1 }, "Stereo Width", 0.0f, 1.0f, 0.6f));
     return layout;
 }
 
@@ -77,6 +78,7 @@ BasicSynthAudioProcessor::BasicSynthAudioProcessor()
     sustainParameter       = getTypedParameter<juce::AudioParameterFloat>  (apvts, "sustain");
     releaseParameter       = getTypedParameter<juce::AudioParameterFloat>  (apvts, "release");
     gainParameter          = getTypedParameter<juce::AudioParameterFloat>  (apvts, "gain");
+    widthParameter         = getTypedParameter<juce::AudioParameterFloat>  (apvts, "width");
 
     if (const auto path = findMidiLogPath (wrapperType); path.isNotEmpty())
         midiLogger.start (juce::File::getCurrentWorkingDirectory().getChildFile (path));
@@ -109,6 +111,7 @@ void BasicSynthAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, j
     params.waveform = waveformParameter->getIndex();
     params.cutoffHz = cutoffParameter->get();
     params.filterOn = filterEnabledParameter->get();
+    params.width    = widthParameter->get();
     params.adsr     = { attackParameter->get(), decayParameter->get(),
                         sustainParameter->get(), releaseParameter->get() };
 
@@ -126,21 +129,47 @@ void BasicSynthAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, j
     outputGain.setTargetValue (juce::Decibels::decibelsToGain (gainParameter->get()));
     outputGain.applyGain (buffer, numSamples);
 
-    pushScope (buffer.getReadPointer (0), numSamples);   // voices are mono: channel 0 is enough
+    pushScope (buffer.getReadPointer (0),
+               buffer.getReadPointer (buffer.getNumChannels() > 1 ? 1 : 0),   // mono bus: L == R
+               numSamples);
+    publishVoiceViews();
     samplesProcessed += numSamples;
 }
 
-void BasicSynthAudioProcessor::pushScope (const float* samples, int numSamples) noexcept
+void BasicSynthAudioProcessor::pushScope (const float* left, const float* right, int numFrames) noexcept
 {
     int i = 0;
-    scopeFifo.write (numSamples).forEach ([&] (int index) { scopeRing[(size_t) index] = samples[i++]; });
+    scopeFifo.write (numFrames).forEach ([&] (int index)
+    {
+        scopeRing[(size_t) (2 * index)]     = left[i];
+        scopeRing[(size_t) (2 * index + 1)] = right[i];
+        ++i;
+    });
 }
 
-int BasicSynthAudioProcessor::drainScope (float* dest, int maxSamples) noexcept
+void BasicSynthAudioProcessor::publishVoiceViews() noexcept
+{
+    for (size_t i = 0; i < voices.size() && i < voiceViews.size(); ++i)
+    {
+        const auto t = voices[i]->getTelemetry();
+        auto& v = voiceViews[i];
+        v.active         .store (t.active,          std::memory_order_relaxed);
+        v.level          .store (t.level,           std::memory_order_relaxed);
+        v.frequencyHz    .store (t.frequencyHz,     std::memory_order_relaxed);
+        v.secondsSinceOn .store (t.secondsSinceOn,  std::memory_order_relaxed);
+        v.secondsSinceOff.store (t.secondsSinceOff, std::memory_order_relaxed);
+    }
+}
+
+int BasicSynthAudioProcessor::drainScope (float* destLeft, float* destRight, int maxFrames) noexcept
 {
     int i = 0;
-    scopeFifo.read (juce::jmin (maxSamples, scopeFifo.getNumReady()))
-             .forEach ([&] (int index) { dest[i++] = scopeRing[(size_t) index]; });
+    scopeFifo.read (juce::jmin (maxFrames, scopeFifo.getNumReady())).forEach ([&] (int index)
+    {
+        destLeft[i]  = scopeRing[(size_t) (2 * index)];
+        destRight[i] = scopeRing[(size_t) (2 * index + 1)];
+        ++i;
+    });
     return i;
 }
 

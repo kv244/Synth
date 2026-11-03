@@ -1,11 +1,11 @@
 ; Neon Synth — NSIS installer script
-; Build:  makensis /DPRODUCT_VERSION=1.1.0 installer.nsi
+; Build:  makensis /DPRODUCT_VERSION=1.2.0 installer.nsi
 
 Unicode True
 
 ; ── Version (override from CI with /DPRODUCT_VERSION=x.y.z) ──────────────────
 !ifndef PRODUCT_VERSION
-  !define PRODUCT_VERSION "1.1.0"
+  !define PRODUCT_VERSION "1.2.0"
 !endif
 
 ; ── Constants ────────────────────────────────────────────────────────────────
