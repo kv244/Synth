@@ -2,7 +2,8 @@
 #include <JuceHeader.h>
 #include "BasicSynthProcessor.h"
 
-class BasicSynthEditor : public juce::AudioProcessorEditor
+class BasicSynthEditor : public juce::AudioProcessorEditor,
+                         private juce::Timer
 {
 public:
     BasicSynthEditor (BasicSynthAudioProcessor& p)
@@ -69,22 +70,26 @@ public:
         filterToggle.setColour (juce::ToggleButton::tickDisabledColourId, magenta.withAlpha (0.3f));
         filterToggleAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>
             (processor.getAPVTS(), "filterEnabled", filterToggle);
-        filterToggle.onStateChange = [this] { updateFilterState(); };
-        updateFilterState();
+        // Follows clicks and host automation alike; callbacks arrive on the message thread.
+        filterEnabledListener = std::make_unique<juce::ParameterAttachment> (
+            *processor.getAPVTS().getParameter ("filterEnabled"),
+            [this] (float value) { updateFilterState (value >= 0.5f); });
+        filterEnabledListener->sendInitialUpdate();
 
         // ── Output visualiser ────────────────────────────────────────────────
-        auto& vis = processor.waveformVisualiser;
-        vis.setBufferSize (512);
-        vis.setRepaintRate (30);
-        vis.setColours (juce::Colours::black, cyan);
-        addAndMakeVisible (vis);
+        // Owned by the editor and fed only from this editor's timer, so every
+        // call into it happens on the message thread.
+        scope.setBufferSize (512);
+        scope.setRepaintRate (30);
+        scope.setColours (juce::Colours::black, cyan);
+        addAndMakeVisible (scope);
+        startTimerHz (30);
 
         setSize (400, 430);
     }
 
-    void updateFilterState()
+    void updateFilterState (bool on)
     {
-        bool on = filterToggle.getToggleState();
         cutoffSlider.setEnabled (on);
         cutoffSlider.setAlpha (on ? 1.0f : 0.4f);
     }
@@ -105,7 +110,7 @@ public:
         cutoffSlider.setBounds (30,  235, 340, 38);
 
         // Output visualiser
-        processor.waveformVisualiser.setBounds (30, 300, 340, 115);
+        scope.setBounds (30, 300, 340, 115);
     }
 
     void paint (juce::Graphics& g) override
@@ -149,7 +154,19 @@ public:
     }
 
 private:
+    void timerCallback() override
+    {
+        const int n = processor.drainScope (scopeScratch.data(), (int) scopeScratch.size());
+        if (n > 0)
+        {
+            const float* channels[] = { scopeScratch.data() };
+            scope.pushBuffer (channels, 1, n);
+        }
+    }
+
     BasicSynthAudioProcessor& processor;
+    juce::AudioVisualiserComponent scope { 1 };
+    std::array<float, BasicSynthAudioProcessor::scopeFifoSize> scopeScratch {};
     juce::Image               backgroundImage;
 
     // Oscillator
@@ -168,6 +185,7 @@ private:
     juce::ToggleButton filterToggle;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> cutoffAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> filterToggleAttachment;
+    std::unique_ptr<juce::ParameterAttachment> filterEnabledListener;   // last: destroyed first
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BasicSynthEditor)
 };

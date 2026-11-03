@@ -81,10 +81,21 @@ def _filter_param_name(plugin) -> str | None:
     return None
 
 
+# Cutoff range in the plugin: 20 Hz - 20 kHz, skewed so 1 kHz sits mid-knob.
+# This mirrors juce::NormalisableRange::setSkewForCentre (1000.0f).
+CUTOFF_MIN, CUTOFF_MAX, CUTOFF_CENTRE = 20.0, 20000.0, 1000.0
+CUTOFF_SKEW = np.log(0.5) / np.log((CUTOFF_CENTRE - CUTOFF_MIN) / (CUTOFF_MAX - CUTOFF_MIN))
+
+
+def cutoff_to_normalised(cutoff_hz: float) -> float:
+    proportion = (cutoff_hz - CUTOFF_MIN) / (CUTOFF_MAX - CUTOFF_MIN)
+    return float(np.clip(proportion, 0.0, 1.0) ** CUTOFF_SKEW)
+
+
 def set_params(plugin, cutoff_hz: float = 2000.0, waveform: int = 0,
                filter_on: bool = True):
     # raw_value is the VST3 normalized [0, 1] representation
-    cutoff_norm   = (cutoff_hz - 20.0) / (20000.0 - 20.0)
+    cutoff_norm   = cutoff_to_normalised(cutoff_hz)
     waveform_norm = waveform / 3.0
     plugin.parameters["cutoff"].raw_value   = float(np.clip(cutoff_norm,   0.0, 1.0))
     plugin.parameters["waveform"].raw_value = float(np.clip(waveform_norm, 0.0, 1.0))
@@ -162,8 +173,8 @@ def test_polyphony_8_voices(plugin):
 
 
 def test_voice_stealing(plugin):
-    """9 simultaneous notes with 8-voice limit — must not crash or go silent."""
-    notes = [60, 62, 64, 65, 67, 69, 71, 72, 74]
+    """17 simultaneous notes with a 16-voice limit — must not crash or go silent."""
+    notes = list(range(48, 65))
     r = rms(render(plugin, notes))
     assert r > 1e-4, f"Voice steal caused silence — RMS {r:.6f}"
     return f"RMS={r:.4f}"
@@ -278,7 +289,17 @@ def main():
                         help="render a demo and save it to a WAV file")
     parser.add_argument("--midilog", metavar="FILE",
                         help="path to write midi logs (processed by plugin)")
+    parser.add_argument("--vst3", metavar="PATH",
+                        help="inner VST3 binary to test (default: the build/ Release artefact)")
     args = parser.parse_args()
+
+    global VST3_PATH
+    if args.vst3:
+        VST3_PATH = os.path.abspath(args.vst3)
+
+    if args.midilog:
+        # The plugin reads this when it is constructed, so set it before loading.
+        os.environ["BASICSYNTH_MIDILOG"] = os.path.abspath(args.midilog)
 
     if not os.path.exists(VST3_PATH):
         sys.exit(

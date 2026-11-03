@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(BasicSynth VERSION 1.0.1 LANGUAGES C CXX)
+project(BasicSynth VERSION 1.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -11,7 +11,7 @@ endif()
 add_subdirectory("${JUCE_DIR}" "${CMAKE_BINARY_DIR}/JUCE")
 
 juce_add_plugin(BasicSynth
-    VERSION                     1.0.1
+    VERSION                     1.1.0
     COMPANY_NAME                "AudioDSP"
     COMPANY_WEBSITE             "https://audiodsp.com"
     BUNDLE_ID                   "com.audiodsp.basicsynth"
@@ -42,12 +42,12 @@ target_sources(BasicSynth
         BasicSynthEditor.h
         BasicSynthProcessor.h
         BasicSynthProcessor.cpp
+        MidiLogger.h
 )
 
 target_compile_definitions(BasicSynth
     PUBLIC
-        JUCE_IGNORE_VST3_MISMATCHED_PARAMETER_ID_WARNING=1
-        BASICSYNTH_AUTHOR="Razvan Julian Petrescu"
+        JUCE_VST3_CAN_REPLACE_VST2=0   # never shipped as VST2; parameters use ParameterID
         JUCE_WEB_BROWSER=0   # plugin has no embedded browser
         JUCE_USE_CURL=0      # plugin has no network I/O
 )
@@ -64,6 +64,10 @@ target_link_libraries(BasicSynth
         juce::juce_audio_plugin_client
         juce::juce_audio_utils
         juce::juce_dsp
+    PUBLIC
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_lto_flags
+        juce::juce_recommended_warning_flags
 )
 
 target_include_directories(BasicSynth
