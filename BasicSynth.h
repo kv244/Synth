@@ -9,7 +9,12 @@ public:
 };
 
 /**
-    One synth voice: band-limited oscillator -> ADSR -> TPT low-pass.
+    One synth voice: band-limited oscillator -> ADSR -> TPT low-pass -> pan.
+
+    Stereo: each voice is panned by its pitch (C4 in the centre, two octaves
+    either side reaching the edges), scaled by the Width parameter. The pan law
+    is constant-power, normalised so a centred voice keeps unity gain on both
+    channels - at Width 0 the output is identical to the old mono voice.
 
     Real-time safe: no allocation, no std::function, renders straight into the
     output buffer (no scratch buffer to overrun), and every parameter that can
@@ -24,8 +29,30 @@ public:
         int   waveform = 0;            // 0 Sine, 1 Square, 2 Triangle, 3 Sawtooth
         float cutoffHz = 2000.0f;
         bool  filterOn = true;
+        float width = 0.0f;            // stereo width, 0 = mono .. 1 = full spread
         juce::ADSR::Parameters adsr;
     };
+
+    /** What the editor's visualisers need to know about this voice. */
+    struct Telemetry
+    {
+        bool  active = false;
+        float level = 0.0f;              // current envelope value, 0..1
+        float frequencyHz = 0.0f;
+        float secondsSinceOn = 0.0f;
+        float secondsSinceOff = -1.0f;   // -1 while the key is held
+    };
+
+    Telemetry getTelemetry() const noexcept
+    {
+        Telemetry t;
+        t.active          = adsr.isActive();
+        t.level           = t.active ? lastEnvelope : 0.0f;
+        t.frequencyHz     = frequencyHz;
+        t.secondsSinceOn  = (float) ((double) samplesSinceOn / sampleRate);
+        t.secondsSinceOff = samplesSinceOff < 0 ? -1.0f : (float) ((double) samplesSinceOff / sampleRate);
+        return t;
+    }
 
     // -12 dB per voice. Measured: a full-velocity 8-note square chord peaks at about
     // +5 dBFS (was +18), so the output gain parameter is still needed for dense chords.
@@ -51,6 +78,10 @@ public:
         filter.setCutoffFrequency (cutoff.getCurrentValue());
 
         filterMix.reset (newSampleRate, 0.01);    // 10 ms crossfade for the on/off toggle
+
+        pan.reset (newSampleRate, 0.02);          // 20 ms so Width changes don't zipper
+        pan.setCurrentAndTargetValue (notePan * width);
+        updatePanGains (pan.getCurrentValue());
     }
 
     /** Audio thread, once per block before rendering. */
@@ -63,13 +94,30 @@ public:
         pendingWaveform = p.waveform;                     // applied at the next phase wrap
         cutoff.setTargetValue (clampCutoff (p.cutoffHz));
         filterMix.setTargetValue (p.filterOn ? 1.0f : 0.0f);
+
+        width = p.width;
+        pan.setTargetValue (notePan * width);
     }
 
     void startNote (int midiNote, float velocity, juce::SynthesiserSound*, int) override
     {
         // Set the pitch directly: no glide from the previous note.
-        phaseInc = (float) (juce::MidiMessage::getMidiNoteInHertz (midiNote) / sampleRate);
+        frequencyHz     = (float) juce::MidiMessage::getMidiNoteInHertz (midiNote);
+        phaseInc        = (float) (frequencyHz / sampleRate);
+        samplesSinceOn  = 0;
+        samplesSinceOff = -1;
         level    = velocity * voiceGain;
+
+        // Pan by pitch. A voice that was silent jumps straight to its new
+        // position; a sounding voice (retrigger or steal) glides there.
+        notePan = juce::jlimit (-1.0f, 1.0f, (float) (midiNote - 60) / 24.0f);
+        if (adsr.isActive())
+            pan.setTargetValue (notePan * width);
+        else
+        {
+            pan.setCurrentAndTargetValue (notePan * width);
+            updatePanGains (pan.getCurrentValue());
+        }
 
         if (hardStopping)
         {
@@ -84,6 +132,8 @@ public:
 
     void stopNote (float, bool allowTailOff) override
     {
+        samplesSinceOff = 0;
+
         if (allowTailOff)
         {
             adsr.noteOff();
@@ -110,30 +160,55 @@ public:
         auto* left  = output.getWritePointer (0);
         auto* right = output.getNumChannels() > 1 ? output.getWritePointer (1) : nullptr;
 
-        for (int i = startSample; i < startSample + numSamples; ++i)
+        int rendered = 0;
+
+        for (int i = startSample; i < startSample + numSamples; ++i, ++rendered)
         {
             if (cutoff.isSmoothing())
                 filter.setCutoffFrequency (cutoff.getNextValue());
 
-            const float dry = nextOscillatorSample() * level * adsr.getNextSample();
+            lastEnvelope    = adsr.getNextSample();
+            const float dry = nextOscillatorSample() * level * lastEnvelope;
             const float wet = filter.processSample (0, dry);   // always run: state stays warm
             const float out = dry + filterMix.getNextValue() * (wet - dry);
 
-            left[i] += out;
+            if (pan.isSmoothing())
+                updatePanGains (pan.getNextValue());
+
             if (right != nullptr)
-                right[i] += out;
+            {
+                left[i]  += out * gainLeft;
+                right[i] += out * gainRight;
+            }
+            else
+            {
+                left[i] += out;   // mono bus: no panning
+            }
 
             if (! adsr.isActive())
             {
                 if (isVoiceActive())
                     clearCurrentNote();
                 filter.reset();
+                lastEnvelope = 0.0f;
                 break;
             }
         }
+
+        samplesSinceOn += rendered;
+        if (samplesSinceOff >= 0)
+            samplesSinceOff += rendered;
     }
 
 private:
+    /** Constant-power pan law, scaled so the centre is unity gain on both sides. */
+    void updatePanGains (float p) noexcept
+    {
+        const float angle = (p + 1.0f) * juce::MathConstants<float>::pi * 0.25f;   // 0 .. pi/2
+        gainLeft  = juce::MathConstants<float>::sqrt2 * std::cos (angle);
+        gainRight = juce::MathConstants<float>::sqrt2 * std::sin (angle);
+    }
+
     float clampCutoff (float hz) const noexcept
     {
         return juce::jlimit (20.0f, 0.45f * (float) sampleRate, hz);   // stay well below Nyquist
@@ -193,9 +268,17 @@ private:
     int    waveform = 0, pendingWaveform = 0;
     bool   hardStopping = false;
 
+    // Telemetry for the GUI (written here on the audio thread, copied out by the processor).
+    float       frequencyHz = 0.0f, lastEnvelope = 0.0f;
+    juce::int64 samplesSinceOn = 0, samplesSinceOff = -1;
+
     juce::ADSR adsr;
     juce::ADSR::Parameters adsrParams;
     juce::dsp::StateVariableTPTFilter<float> filter;
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Multiplicative> cutoff { 2000.0f };
     juce::SmoothedValue<float> filterMix { 1.0f };
+
+    // Stereo placement
+    float notePan = 0.0f, width = 0.0f, gainLeft = 1.0f, gainRight = 1.0f;
+    juce::SmoothedValue<float> pan { 0.0f };
 };

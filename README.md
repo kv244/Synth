@@ -18,8 +18,9 @@ by **Razvan Julian Petrescu** / **AudioDSP**.
 - **ADSR envelope** — linear segments whose durations match the knob values
 - **Band-limited oscillators** — PolyBLEP square and sawtooth to reduce aliasing
 - **Output gain** — host-automatable output level (−48 dB to +6 dB)
-- **Post-filter waveform display** — live output visualiser in the UI
-- **Custom neon GUI** — background image, cyan/magenta controls
+- **Stereo width** — voices are panned by pitch (middle C centred, two octaves either side at the edges); 0% is mono, 100% full spread
+- **Visualisers** — triggered oscilloscope locked to the lowest held note, spectrum analyser with the live filter curve, ADSR shape with a dot per sounding voice, 16 voice lights and an L/R output meter with peak hold and clip light
+- **Custom neon GUI** — background image, cyan/magenta/amber controls; resizable from 75% to 200%
 - **MIDI** — works with any MIDI controller or keyboard
 - **MIDI Logging** — optional, real-time-safe logging of received MIDI messages to a file (`BASICSYNTH_MIDILOG=<file>`, or `--midilog <file>` in the Standalone)
 - **DAW automation** — all parameters are automatable in VST3 hosts
@@ -98,9 +99,14 @@ the **AudioDSP** manufacturer in your DAW's instrument browser.
 | Control | Colour | Description |
 |---|---|---|
 | Waveform | Cyan | Oscillator shape — Sine / Square / Triangle / Sawtooth |
+| ATK / DEC / SUS / REL | Amber | Envelope knobs, with their values shown underneath; the graph above them draws the shape and a dot for every sounding voice |
 | Filter ON | Magenta | Toggle button — enables / bypasses the filter (dims the cutoff slider when off) |
 | Cutoff | Magenta | Low-pass filter cutoff frequency (20 Hz – 20 kHz) |
-| Output | Cyan | Live post-filter waveform display |
+| Voices | Cyan | One light per voice; brightness follows that voice's envelope |
+| Scope / Spectrum | Cyan | Output display: an oscilloscope locked to the lowest held note, or a spectrum with the filter's response curve drawn on top |
+| Meter | Cyan | Left / right output level with peak hold; the red light marks clipping (click the meter to reset) |
+| Gain | Cyan | Output level, −48 dB to +6 dB |
+| Width | Cyan | Stereo spread of voices by pitch, 0–100% |
 
 ---
 
@@ -125,7 +131,7 @@ Expected output:
 
 ```
 Loading plugin …
-Parameters: ['waveform', 'cutoff', 'filter_enabled', 'attack', 'decay', 'sustain', 'release', 'output_gain_db', 'bypass']
+Parameters: ['waveform', 'cutoff', 'filter_enabled', 'attack', 'decay', 'sustain', 'release', 'output_gain_db', 'stereo_width', 'bypass']
 
   PASS  Single note             RMS=0.0799
   PASS  Polyphony (4ch)         single=0.0799  chord=0.1596
@@ -275,7 +281,9 @@ audio_bright = plugin.process(msgs, 2.5, SR, reset=True)
 |---|---|
 | `BasicSynth.h` | Voice and sound classes — oscillator, filter, envelope |
 | `BasicSynthProcessor.h/cpp` | `AudioProcessor` — parameter management, MIDI, state |
-| `BasicSynthEditor.h` | Neon UI — waveform selector, filter slider, output display |
+| `BasicSynthEditor.h` | Neon UI — layout, controls, resizing, the 30 Hz timer that feeds the visualisers |
+| `MidiLogger.h` | Real-time-safe MIDI logging (lock-free FIFO + background writer thread) |
+| `Visualisers.h` | Oscilloscope, spectrum analyser, ADSR graph, voice lights and L/R meter (message thread only) |
 | `CMakeLists.txt` | Build config — Standalone + VST3, JUCE path, binary resources |
 | `gui_background.png` | Neon grid background image (embedded as binary data) |
 | `icon.png` | Application / plugin icon |

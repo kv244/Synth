@@ -38,24 +38,45 @@ public:
 
     juce::AudioProcessorValueTreeState& getAPVTS() { return apvts; }
 
+    static constexpr int numVoices = 16;
+
+    //==========================================================================
+    // Per-voice state for the visualisers. Written once per block on the audio
+    // thread (relaxed atomic stores), read by the editor's timer. Fields may be
+    // from neighbouring blocks, which is fine for display.
+    struct VoiceView
+    {
+        std::atomic<bool>  active { false };
+        std::atomic<float> level { 0.0f };
+        std::atomic<float> frequencyHz { 0.0f };
+        std::atomic<float> secondsSinceOn { 0.0f };
+        std::atomic<float> secondsSinceOff { -1.0f };
+    };
+
+    const std::array<VoiceView, numVoices>& getVoiceViews() const noexcept { return voiceViews; }
+
     //==========================================================================
     // Scope data: audio thread writes, editor timer (message thread) reads.
     static constexpr int scopeFifoSize = 1 << 15;   // ~0.7 s at 48 kHz
 
-    /** Message thread only. Returns the number of samples copied into dest. */
-    int drainScope (float* dest, int maxSamples) noexcept;
+    /** Message thread only. Copies up to maxFrames stereo frames; returns how many. */
+    int drainScope (float* destLeft, float* destRight, int maxFrames) noexcept;
 
 private:
-    void pushScope (const float* samples, int numSamples) noexcept;
+    void pushScope (const float* left, const float* right, int numFrames) noexcept;
 
+    // Stereo frames, interleaved L/R: index i of the FIFO lives at 2i and 2i + 1.
     juce::AbstractFifo scopeFifo { scopeFifoSize };
-    std::array<float, scopeFifoSize> scopeRing {};
+    std::array<float, 2 * scopeFifoSize> scopeRing {};
 
     MidiLogger  midiLogger;
     juce::int64 samplesProcessed = 0;
 
     juce::Synthesiser synth;
     std::vector<BasicSynthVoice*> voices;    // owned by synth; cached to avoid dynamic_cast per block
+    std::array<VoiceView, numVoices> voiceViews;
+
+    void publishVoiceViews() noexcept;
 
     juce::AudioProcessorValueTreeState apvts;
 
@@ -67,6 +88,7 @@ private:
     juce::AudioParameterFloat*  sustainParameter       = nullptr;
     juce::AudioParameterFloat*  releaseParameter       = nullptr;
     juce::AudioParameterFloat*  gainParameter          = nullptr;
+    juce::AudioParameterFloat*  widthParameter         = nullptr;
 
     juce::SmoothedValue<float> outputGain { 1.0f };
 
