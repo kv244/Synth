@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(BasicSynth VERSION 1.2.0 LANGUAGES C CXX)
+project(BasicSynth VERSION 1.3.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -11,7 +11,7 @@ endif()
 add_subdirectory("${JUCE_DIR}" "${CMAKE_BINARY_DIR}/JUCE")
 
 juce_add_plugin(BasicSynth
-    VERSION                     1.2.0
+    VERSION                     1.3.0
     COMPANY_NAME                "AudioDSP"
     COMPANY_WEBSITE             "https://audiodsp.com"
     BUNDLE_ID                   "com.audiodsp.basicsynth"
@@ -44,6 +44,8 @@ target_sources(BasicSynth
         BasicSynthProcessor.cpp
         MidiLogger.h
         Visualisers.h
+        StepSequencer.h
+        SequencerView.h
 )
 
 target_compile_definitions(BasicSynth
@@ -75,3 +77,25 @@ target_include_directories(BasicSynth
     PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}
 )
+
+# ---------------------------------------------------------------------------
+# Optional unit tests for the step sequencer engine (StepSequencer.h).
+# It only needs juce_audio_basics, so it builds in a few seconds once JUCE is
+# compiled:
+#   cmake -B build -DJUCE_DIR=... -DBASICSYNTH_BUILD_TESTS=ON
+#   cmake --build build --config Release --target StepSequencerTests
+# The executable exits non-zero if any test fails.
+# ---------------------------------------------------------------------------
+option(BASICSYNTH_BUILD_TESTS "Build the StepSequencer unit tests" OFF)
+
+if(BASICSYNTH_BUILD_TESTS)
+    juce_add_console_app(StepSequencerTests PRODUCT_NAME "StepSequencerTests")
+    target_sources(StepSequencerTests PRIVATE tests/StepSequencerTests.cpp)
+    target_compile_definitions(StepSequencerTests PRIVATE
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0)
+    target_link_libraries(StepSequencerTests PRIVATE
+        juce::juce_audio_basics
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags)
+endif()
