@@ -333,6 +333,24 @@ def test_sequencer_timing(plugin):
     return f"{len(found)} notes, worst timing error {worst * 1000:.2f} ms"
 
 
+def test_no_stuck_note_on_mode_change(plugin):
+    """A key pressed in Layer and released after switching to Transpose must still stop.
+
+    Before v1.4.0 the note-off was filtered out with the note-ons, so the voice
+    sustained forever. Transpose with no key held plays nothing, so any sound
+    after the release time is the stuck keyboard note."""
+    set_params(plugin)
+    plugin.process([mido.Message("note_on", note=60, velocity=100, time=0.0)],
+                   0.5, SAMPLE_RATE, reset=True)                       # Layer, sequencer off: key down
+    mode = find_param(plugin, "sequencer", "mode")
+    with SequencerOn(plugin, **{mode: 1.0}):                          # Transpose (last choice)
+        audio = plugin.process([mido.Message("note_off", note=60, velocity=0, time=0.0)],
+                               1.5, SAMPLE_RATE, reset=False)          # key up after the switch
+    after_release = rms(audio[:, int(0.8 * SAMPLE_RATE):])             # release is 300 ms by default
+    assert after_release < 1e-5, f"Note still sounding after its note-off — RMS {after_release:.6f}"
+    return f"RMS after release={after_release:.7f}"
+
+
 # ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
@@ -348,6 +366,7 @@ TESTS = [
     ("Velocity scaling",  test_velocity_scaling),
     ("Sequencer plays",   test_sequencer_plays),
     ("Sequencer timing",  test_sequencer_timing),
+    ("No stuck note",     test_no_stuck_note_on_mode_change),
 ]
 
 

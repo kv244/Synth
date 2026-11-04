@@ -275,18 +275,28 @@ void BasicSynthAudioProcessor::buildPlayMidi (const juce::MidiBuffer& input, int
         numHeldKeys = 0;   // forget keys held under another mode
 
     // 1. Keyboard input. Layer passes everything through; Replace and Transpose
-    //    keep controllers, pitch bend and so on, but take note messages out of
-    //    the synth's path (Transpose uses them to steer the pattern instead).
+    //    keep controllers, pitch bend and so on, but take note-ons out of the
+    //    synth's path (Transpose uses them to steer the pattern instead).
+    //
+    //    Note-offs reach the synth in every mode: a key pressed in Layer and
+    //    released after switching to Replace or Transpose (or after turning the
+    //    sequencer on) must still stop its voice. juce::Synthesiser ignores a
+    //    note-off for a note that isn't sounding, so this is harmless.
+    //    SysEx is dropped: the synth ignores it, and a large dump could
+    //    outgrow playMidi's preallocated capacity on the audio thread.
     for (const auto event : input)
     {
-        const int  status = event.numBytes >= 3 ? (event.data[0] & 0xf0) : 0;
-        const bool noteOn = status == 0x90 && event.data[2] > 0;
-        const bool isNote = noteOn || status == 0x80 || status == 0x90;
+        if (event.numBytes > 0 && event.data[0] == 0xf0)
+            continue;   // SysEx
 
-        if (isNote && mode == SequencerMode::transpose)
+        const int  status  = event.numBytes >= 3 ? (event.data[0] & 0xf0) : 0;
+        const bool noteOn  = status == 0x90 && event.data[2] > 0;
+        const bool noteOff = status == 0x80 || (status == 0x90 && event.data[2] == 0);
+
+        if ((noteOn || noteOff) && mode == SequencerMode::transpose)
             trackHeldKey (event.data[1], noteOn);
 
-        if (! isNote || mode == SequencerMode::layer)
+        if (! noteOn || mode == SequencerMode::layer)
             playMidi.addEvent (event.data, event.numBytes, event.samplePosition);
     }
 
