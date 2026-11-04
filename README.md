@@ -84,6 +84,10 @@ cmake --build build --config Release
 Run `BasicSynth.exe`. Click **Options → Audio/MIDI Settings** to select your
 audio output and MIDI input device, then play from any connected MIDI keyboard.
 
+**No MIDI keyboard?** Press **RUN** — the step sequencer plays its pattern on its own. To play notes, use a virtual keyboard such as [VMPK](https://vmpk.sourceforge.io/) routed through [loopMIDI](https://www.tobias-erichsen.de/software/loopmidi.html), then tick the loopMIDI port under MIDI inputs.
+
+**No sound?** Check that the output device is selected and its channels are ticked under *Active output channels*. Laptop speakers reproduce very little below about 200 Hz, so low notes on the Sine or Triangle waveform can be almost inaudible — switch to Sawtooth or Square, raise the notes, or use headphones. The **?** button in the top-right corner has these tips too.
+
 You can also launch the standalone application with the `--midilog <file>` parameter, or set the `BASICSYNTH_MIDILOG` environment variable, to log real-time MIDI input:
 ```bash
 BasicSynth.exe --midilog log.txt
@@ -118,8 +122,8 @@ A 16-step sequencer sits along the bottom of the window. It is **off by default*
 
 | Control | Description |
 |---|---|
-| RUN | Starts / stops the sequencer. Stopping releases any sounding notes at once. |
-| SYNC | On: follow the host's tempo and transport (the pattern locks to the DAW's bars and stops when the DAW stops). The readout then shows `HOST` and the host tempo. If the host has no transport — e.g. the Standalone — the sequencer uses TEMPO instead. Off: always use TEMPO. |
+| RUN | Starts / stops the sequencer (lit amber while running). Stopping releases any sounding notes at once. |
+| SYNC | Lit = on. On: follow the host's tempo and transport (the pattern locks to the DAW's bars and stops when the DAW stops). The readout then shows `HOST` and the host tempo. If the host has no transport — e.g. the Standalone — the sequencer uses TEMPO instead. Off: always use TEMPO. |
 | TEMPO | Internal tempo, 40–240 BPM. |
 | Rate | Step length: 1/8, 1/16, 1/32, 1/8T or 1/16T. |
 | Mode | **Layer** — sequencer and keyboard both play. **Replace** — keyboard notes are ignored. **Transpose** — the pattern plays only while a key is held, shifted by (key − C4); the most recently pressed key wins. |
