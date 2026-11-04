@@ -83,6 +83,13 @@ BasicSynthAudioProcessor::BasicSynthAudioProcessor()
 
     synth.addSound (new BasicSynthSound());
 
+    // By default juce::Synthesiser handles any MIDI event that falls within 32
+    // samples of its last render point immediately, so a note could start up to
+    // 31 samples early. Splitting on every event keeps keyboard and sequencer
+    // notes on their exact sample; the extra sub-blocks only appear when events
+    // are dense, and cost little (see README, "Performance").
+    synth.setMinimumRenderingSubdivisionSize (1, true);
+
     waveformParameter      = getTypedParameter<juce::AudioParameterChoice> (apvts, "waveform");
     cutoffParameter        = getTypedParameter<juce::AudioParameterFloat>  (apvts, "cutoff");
     filterEnabledParameter = getTypedParameter<juce::AudioParameterBool>   (apvts, "filterEnabled");

@@ -284,21 +284,18 @@ class SequencerOn:
         return False
 
 
-def onset_times(audio: np.ndarray, frame: int = 64) -> list[float]:
-    """Times (s) where the signal rises out of silence: crude but robust for gated notes."""
-    mono = np.abs(audio[0] + audio[1])
-    frames = len(mono) // frame
-    env = mono[: frames * frame].reshape(frames, frame).max(axis=1)
-    threshold = 0.1 * env.max()
-    quiet_frames_needed = int(0.02 * SAMPLE_RATE / frame)  # 20 ms of quiet before a new onset
-    onsets, quiet = [], quiet_frames_needed
-    for i, level in enumerate(env):
-        if level > threshold:
-            if quiet >= quiet_frames_needed:
-                onsets.append(i * frame / SAMPLE_RATE)
-            quiet = 0
-        else:
-            quiet += 1
+def onset_times(audio: np.ndarray) -> list[float]:
+    """Times (s) of the first non-silent sample after at least 20 ms of digital silence.
+
+    Exact to the sample when notes are separated by true silence (short release),
+    which is how the sequencer timing test sets them up."""
+    loud = np.abs(audio[0]) + np.abs(audio[1]) > 1e-7
+    gap = int(0.02 * SAMPLE_RATE)
+    onsets, last_loud = [], -gap
+    for i in np.flatnonzero(loud):
+        if i - last_loud >= gap:
+            onsets.append(i / SAMPLE_RATE)
+        last_loud = i
     return onsets
 
 
@@ -315,7 +312,7 @@ def test_sequencer_plays(plugin):
 
 
 def test_sequencer_timing(plugin):
-    """At 120 BPM in 1/8 steps, notes start exactly on the pattern's steps (0.25 s apart)."""
+    """At 120 BPM in 1/8 steps, notes start on the pattern's steps (0.25 s apart) to within 2 samples."""
     set_params(plugin, filter_on=False)
     fast_envelope = {
         find_param(plugin, "attack"): 0.0,     # 1 ms
@@ -329,8 +326,32 @@ def test_sequencer_timing(plugin):
     found = onset_times(audio)
     assert len(found) == len(expected), f"Expected {len(expected)} notes, found {len(found)}: {found}"
     worst = max(abs(f - e) for f, e in zip(found, expected))
-    assert worst < 0.005, f"Onsets off by up to {worst * 1000:.1f} ms"
-    return f"{len(found)} notes, worst timing error {worst * 1000:.2f} ms"
+    worst_samples = worst * SAMPLE_RATE
+    assert worst_samples <= 2.0, f"Onsets off by up to {worst_samples:.0f} samples ({worst * 1000:.2f} ms)"
+    return f"{len(found)} notes, worst timing error {worst_samples:.0f} samples ({worst * 1000:.3f} ms)"
+
+
+def test_close_events_sample_accurate(plugin):
+    """Two notes 20 samples apart in the same block each start on their own sample.
+
+    juce::Synthesiser's default handles events less than 32 samples after the
+    previous one together, so before v1.4.0 the second note started 20 samples
+    early. With Width at 100%, C2 is hard left (silent on the right) and C6 hard
+    right, so the right channel's first sample is the second note's start."""
+    set_params(plugin)
+    width = find_param(plugin, "width")
+    saved = plugin.parameters[width].raw_value
+    plugin.parameters[width].raw_value = 1.0
+    first, second = 4410, 4430                      # samples
+    msgs = [mido.Message("note_on", note=36, velocity=100, time=first / SAMPLE_RATE),
+            mido.Message("note_on", note=84, velocity=100, time=second / SAMPLE_RATE)]
+    audio = plugin.process(msgs, 0.3, SAMPLE_RATE, reset=True)
+    plugin.parameters[width].raw_value = saved
+    start_left = int(np.flatnonzero(np.abs(audio[0]) > 1e-7)[0])
+    start_right = int(np.flatnonzero(np.abs(audio[1]) > 1e-7)[0])
+    assert abs(start_left - first) <= 1, f"First note started at sample {start_left}, expected {first}"
+    assert abs(start_right - second) <= 1, f"Second note started at sample {start_right}, expected {second}"
+    return f"notes at samples {start_left} and {start_right} (expected {first}, {second})"
 
 
 def test_no_stuck_note_on_mode_change(plugin):
@@ -367,6 +388,7 @@ TESTS = [
     ("Sequencer plays",   test_sequencer_plays),
     ("Sequencer timing",  test_sequencer_timing),
     ("No stuck note",     test_no_stuck_note_on_mode_change),
+    ("Close events",      test_close_events_sample_accurate),
 ]
 
 
