@@ -42,6 +42,23 @@ public:
     static constexpr int numVoices = 16;
 
     //==========================================================================
+    // Output soft clipper (applied after the output gain). Below the knee the
+    // signal passes through untouched; above it, it bends smoothly (tanh) towards
+    // the ceiling and can never exceed it. Stateless, so no latency and no pumping.
+    static constexpr float softClipKnee    = 0.50118723f;   // -6 dBFS
+    static constexpr float softClipCeiling = 0.89125094f;   // -1 dBFS
+
+    static float softClip (float x) noexcept
+    {
+        const float magnitude = std::abs (x);
+        if (magnitude <= softClipKnee)
+            return x;
+
+        constexpr float range = softClipCeiling - softClipKnee;
+        return std::copysign (softClipKnee + range * std::tanh ((magnitude - softClipKnee) / range), x);
+    }
+
+    //==========================================================================
     // Per-voice state for the visualisers. Written once per block on the audio
     // thread (relaxed atomic stores), read by the editor's timer. Fields may be
     // from neighbouring blocks, which is fine for display.

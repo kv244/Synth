@@ -371,13 +371,16 @@ private:
 //==============================================================================
 /**
     Stereo output meter: an RMS bar per channel, a peak line, a 1.5 s peak hold
-    and a shared clip light. Click to reset the hold and the clip light.
+    and a shared clip light. The output never exceeds the soft clipper's -1 dBFS
+    ceiling, so the light shows when the clipper is working hard (peaks above
+    -2 dBFS) rather than digital overs. Click to reset the hold and the light.
 */
 class LevelMeter : public juce::Component,
                    public juce::SettableTooltipClient
 {
 public:
-    LevelMeter() { setTooltip ("Output level L / R (dBFS). Click to reset the peak hold and clip light."); }
+    LevelMeter() { setTooltip ("Output level L / R (dBFS). Red light: the output soft clipper is near its -1 dBFS ceiling. "
+                               "Click to reset the peak hold and the light."); }
 
     void update (const float* left, const float* right, int numSamples, int framesPerSecond)
     {
@@ -458,6 +461,7 @@ public:
 private:
     static constexpr float minDb = -60.0f;
     static constexpr float maxDb = 6.0f;
+    static constexpr float clipLightThreshold = 0.79432823f;   // -2 dBFS: the soft clipper is close to its ceiling
 
     struct Channel
     {
@@ -472,7 +476,7 @@ private:
                 peak = juce::jmax (peak, std::abs (samples[i]));
                 sumSquares += samples[i] * samples[i];
             }
-            clipped = clipped || peak >= 1.0f;
+            clipped = clipped || peak >= clipLightThreshold;
 
             const float rms    = numSamples > 0 ? std::sqrt (sumSquares / (float) numSamples) : 0.0f;
             const float peakDb = juce::Decibels::gainToDecibels (peak, minDb);

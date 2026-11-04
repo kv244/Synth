@@ -331,6 +331,22 @@ def test_sequencer_timing(plugin):
     return f"{len(found)} notes, worst timing error {worst_samples:.0f} samples ({worst * 1000:.3f} ms)"
 
 
+def test_headroom(plugin):
+    """16 full-velocity square voices plus +6 dB output gain stay under the -1 dBFS ceiling,
+    while a single note (well below the -6 dBFS knee) passes through unclipped."""
+    gain = find_param(plugin, "gain")
+    saved = plugin.parameters[gain].raw_value
+    plugin.parameters[gain].raw_value = 1.0                      # +6 dB, the maximum
+    loud = render(plugin, list(range(48, 64)), velocity=127, waveform=1, cutoff_hz=18000)
+    plugin.parameters[gain].raw_value = saved
+    single = render(plugin, [60], velocity=100, waveform=1, cutoff_hz=18000)
+    ceiling = 10 ** (-1 / 20)
+    peak_loud, peak_single = float(np.abs(loud).max()), float(np.abs(single).max())
+    assert peak_loud <= ceiling + 1e-6, f"Peak {20 * np.log10(peak_loud):+.2f} dBFS exceeds the -1 dBFS ceiling"
+    assert peak_single < 10 ** (-6 / 20), f"Single note peaked at {20 * np.log10(peak_single):+.2f} dBFS, inside the knee"
+    return f"16 voices +6 dB: {20 * np.log10(peak_loud):+.2f} dBFS  single note: {20 * np.log10(peak_single):+.2f} dBFS"
+
+
 def test_close_events_sample_accurate(plugin):
     """Two notes 20 samples apart in the same block each start on their own sample.
 
@@ -389,6 +405,7 @@ TESTS = [
     ("Sequencer timing",  test_sequencer_timing),
     ("No stuck note",     test_no_stuck_note_on_mode_change),
     ("Close events",      test_close_events_sample_accurate),
+    ("Headroom",          test_headroom),
 ]
 
 

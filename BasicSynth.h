@@ -54,8 +54,8 @@ public:
         return t;
     }
 
-    // -12 dB per voice. Measured: a full-velocity 8-note square chord peaks at about
-    // +5 dBFS (was +18), so the output gain parameter is still needed for dense chords.
+    // -12 dB per voice. A full-velocity 8-note square chord would peak at about
+    // +5 dBFS; the processor's output soft clipper keeps the output under -1 dBFS.
     static constexpr float voiceGain = 0.25f;
 
     bool canPlaySound (juce::SynthesiserSound* s) override

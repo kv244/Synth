@@ -165,6 +165,15 @@ void BasicSynthAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, j
     outputGain.setTargetValue (juce::Decibels::decibelsToGain (gainParameter->get()));
     outputGain.applyGain (buffer, numSamples);
 
+    // Headroom: 16 full-velocity voices can sum to about +12 dBFS. The soft
+    // clipper keeps the output under -1 dBFS and is bit-transparent below -6 dBFS.
+    for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+    {
+        auto* samples = buffer.getWritePointer (ch);
+        for (int i = 0; i < numSamples; ++i)
+            samples[i] = softClip (samples[i]);
+    }
+
     pushScope (buffer.getReadPointer (0),
                buffer.getReadPointer (buffer.getNumChannels() > 1 ? 1 : 0),   // mono bus: L == R
                numSamples);
