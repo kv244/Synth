@@ -1,13 +1,18 @@
 name: Release
 
+# Publishes a release only when a version tag is pushed:
+#
+#   1. Bump the version in CMakeLists.txt (both places) and installer.nsi, merge to master.
+#   2. git tag v1.4.0 && git push origin v1.4.0
+#
+# The job refuses to run if the tag doesn't match the CMakeLists.txt version or
+# if a release for the tag already exists, so a release is never overwritten.
+# Pushing to master no longer publishes anything.
+
 on:
   push:
-    branches:
-      - master
-      - main
     tags:
       - 'v*'
-  workflow_dispatch:
 
 permissions:
   contents: write
@@ -15,15 +20,32 @@ permissions:
 jobs:
   build-installer:
     runs-on: windows-latest
-    permissions:
-      contents: write
+    timeout-minutes: 60
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262   # v4.4.0
+
+      - name: Check the tag against CMakeLists.txt and existing releases
+        id: version
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          CMAKE_VERSION=$(python -c "import re; text=open('CMakeLists.txt').read(); print(re.search(r'project\(NeonSynth VERSION\s+(\d+\.\d+\.\d+)', text).group(1))")
+          if [[ "$TAG_VERSION" != "$CMAKE_VERSION" ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match CMakeLists.txt version $CMAKE_VERSION"
+            exit 1
+          fi
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            echo "::error::A release for $GITHUB_REF_NAME already exists; bump the version instead of re-releasing"
+            exit 1
+          fi
+          echo "tag=${TAG_VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Cache JUCE
         id: cache-juce
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830        # v4.3.0
         with:
           path: C:\JUCE
           key: juce-windows-9.0.0
@@ -33,39 +55,38 @@ jobs:
         run: git clone --depth=1 --branch 9.0.0 https://github.com/juce-framework/JUCE.git C:\JUCE
 
       - name: Configure
-        shell: bash
-        run: |
-          cmake -S . -B build \
-            -DJUCE_DIR="C:/JUCE" \
-            -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S . -B build -DJUCE_DIR="C:/JUCE" -DNEONSYNTH_BUILD_TESTS=ON
 
       - name: Build
-        run: cmake --build build --config Release
+        run: cmake --build build --config Release --parallel
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Sequencer unit tests
+        run: build\StepSequencerTests_artefacts\Release\StepSequencerTests.exe
+
+      - name: Envelope unit tests
+        run: build\VoiceEnvelopeTests_artefacts\Release\VoiceEnvelopeTests.exe
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
-          python-version: '3.x'
+          python-version: '3.14'
 
       - name: Install Python test dependencies
-        run: pip install pedalboard mido numpy
+        run: pip install -r requirements-test.txt
 
-      - name: Run plugin tests
+      - name: Python test suite (VST3)
         run: python test_midi.py
+
+      - name: pluginval (strictness 10)
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://github.com/Tracktion/pluginval/releases/download/v1.0.4/pluginval_Windows.zip -OutFile pluginval.zip
+          Expand-Archive pluginval.zip -DestinationPath pluginval
+          .\pluginval\pluginval.exe --strictness-level 10 --validate-in-process --skip-gui-tests `
+              --validate build\NeonSynth_artefacts\Release\VST3\NeonSynth.vst3
+          exit $LASTEXITCODE
 
       - name: Install NSIS
         run: choco install nsis -y --no-progress
-
-      - name: Extract version
-        id: version
-        shell: bash
-        run: |
-          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            TAG_VERSION="${GITHUB_REF_NAME#v}"
-          else
-            TAG_VERSION=$(python -c "import re; text=open('CMakeLists.txt').read(); m=re.search(r'project\(NeonSynth VERSION\s+(\d+\.\d+\.\d+)', text); print(m.group(1))")
-          fi
-          echo "tag=${TAG_VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Build installer
         shell: pwsh
@@ -75,7 +96,7 @@ jobs:
               installer.nsi
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65   # v2.6.2
         with:
           name: "Neon Synth v${{ steps.version.outputs.tag }}"
           tag_name: "v${{ steps.version.outputs.tag }}"
@@ -91,6 +112,9 @@ jobs:
             |---|---|
             | VST3 plugin | `C:\Program Files\Common Files\VST3\NeonSynth.vst3` |
             | Standalone app | `C:\Program Files\AudioDSP\Neon Synth\NeonSynth.exe` |
+
+            Upgrading from BasicSynth (v1.3 and earlier)? The installer removes the old
+            `BasicSynth.vst3`; projects saved with BasicSynth open with NeonSynth.
 
             ### Requirements
             - Windows 10 / 11 (64-bit)

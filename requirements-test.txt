@@ -1,0 +1,4 @@
+# Python dependencies for test_midi.py, pinned so CI results don't change under us.
+pedalboard==0.9.23
+mido==1.3.3
+numpy==2.3.5
