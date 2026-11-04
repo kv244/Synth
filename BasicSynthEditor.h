@@ -3,6 +3,7 @@
 #include "BasicSynthProcessor.h"
 #include "Visualisers.h"
 #include "SequencerView.h"
+#include "HelpOverlay.h"
 
 /**
     Neon Synth editor.
@@ -15,6 +16,9 @@
     Right column: scope / spectrum, stereo meter, output gain and stereo width.
     Bottom strip: the step sequencer - run / sync / tempo / rate / mode on the
     first row, the 16-step grid, then swing and gate.
+
+    The "?" button in the top-right corner opens HelpOverlay, a quick-reference
+    page drawn over the whole editor.
 
     A 30 Hz timer drains the processor's lock-free scope FIFO and reads the
     per-voice atomics; it is the only path from audio to GUI.
@@ -172,6 +176,23 @@ public:
         seqGateAttachment = std::make_unique<SliderAttachment> (apvts, "seqGate", seqGateSlider);
         setUpReadout (seqGateReadout, neon::amber, juce::Justification::centredRight);
 
+        // Help: "?" toggles the overlay; the overlay un-toggles the button when it closes itself.
+        helpButton.setClickingTogglesState (true);
+        helpButton.setTooltip ("Quick help");
+        helpButton.setColour (juce::TextButton::buttonColourId,   juce::Colours::transparentBlack);
+        helpButton.setColour (juce::TextButton::buttonOnColourId, neon::cyan.withAlpha (0.25f));
+        helpButton.setColour (juce::TextButton::textColourOffId,  neon::cyan);
+        helpButton.setColour (juce::TextButton::textColourOnId,   neon::cyan);
+        helpButton.setColour (juce::ComboBox::outlineColourId,    neon::cyan.withAlpha (0.6f));
+        helpButton.onClick = [this]
+        {
+            if (helpButton.getToggleState()) helpOverlay.show();
+            else                             helpOverlay.setVisible (false);
+        };
+        helpOverlay.onClose = [this] { helpButton.setToggleState (false, juce::dontSendNotification); };
+        addAndMakeVisible (helpButton);
+        addChildComponent (helpOverlay);   // added last, so it sits above every control
+
         // The chosen view is GUI state, saved with the plugin's state but not automatable.
         setView ((int) apvts.state.getProperty (viewPropertyId, 0));
 
@@ -245,6 +266,9 @@ public:
         place (seqSwingReadout, 310, 489, 60, 16);
         place (seqGateSlider,   446, 486, 234, 22);
         place (seqGateReadout,  680, 489, 60, 16);
+
+        place (helpButton, 712, 12, 28, 24);
+        helpOverlay.setBounds (getLocalBounds());
 
         for (auto* label : { &attackReadout, &decayReadout, &sustainReadout, &releaseReadout,
                              &cutoffReadout, &gainReadout, &widthReadout,
@@ -453,6 +477,10 @@ private:
     std::unique_ptr<ButtonAttachment>   seqOnAttachment, seqSyncAttachment;
     std::unique_ptr<SliderAttachment>   seqTempoAttachment, seqSwingAttachment, seqGateAttachment;
     std::unique_ptr<ComboBoxAttachment> seqRateAttachment, seqModeAttachment;
+
+    // Help
+    juce::TextButton helpButton { "?" };
+    HelpOverlay      helpOverlay { baseWidth };
 
     std::unique_ptr<juce::ParameterAttachment> filterEnabledListener;   // last: destroyed first
 

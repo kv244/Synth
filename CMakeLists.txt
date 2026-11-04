@@ -46,6 +46,7 @@ target_sources(BasicSynth
         Visualisers.h
         StepSequencer.h
         SequencerView.h
+        HelpOverlay.h
 )
 
 target_compile_definitions(BasicSynth

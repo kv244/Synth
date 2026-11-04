@@ -21,7 +21,7 @@ by **Razvan Julian Petrescu** / **AudioDSP**.
 - **Stereo width** — voices are panned by pitch (middle C centred, two octaves either side at the edges); 0% is mono, 100% full spread
 - **Visualisers** — triggered oscilloscope locked to the lowest held note, spectrum analyser with the live filter curve, ADSR shape with a dot per sounding voice, 16 voice lights and an L/R output meter with peak hold and clip light
 - **16-step sequencer** — sample-accurate, synced to the host transport or its own tempo, with swing, gate, five step rates and three keyboard modes (Layer / Replace / Transpose); the pattern is saved with the session
-- **Custom neon GUI** — background image, cyan/magenta/amber controls; resizable from 75% to 200%
+- **Custom neon GUI** — background image, cyan/magenta/amber controls; resizable from 75% to 200%; a **?** button opens quick help
 - **MIDI** — works with any MIDI controller or keyboard
 - **MIDI Logging** — optional, real-time-safe logging of received MIDI messages to a file (`BASICSYNTH_MIDILOG=<file>`, or `--midilog <file>` in the Standalone)
 - **DAW automation** — all parameters are automatable in VST3 hosts
@@ -108,6 +108,7 @@ the **AudioDSP** manufacturer in your DAW's instrument browser.
 | Meter | Cyan | Left / right output level with peak hold; the red light marks clipping (click the meter to reset) |
 | Gain | Cyan | Output level, −48 dB to +6 dB |
 | Width | Cyan | Stereo spread of voices by pitch, 0–100% |
+| ? | Cyan | Quick help drawn over the window — sequencer editing, modes, controls and no-sound tips. Click anywhere or press Esc to close |
 
 ---
 
@@ -314,6 +315,7 @@ audio_bright = plugin.process(msgs, 2.5, SR, reset=True)
 | `MidiLogger.h` | Real-time-safe MIDI logging (lock-free FIFO + background writer thread) |
 | `StepSequencer.h` | Step sequencer engine — timing, swing, gate, note-off queue, lock-free pattern |
 | `SequencerView.h` | The 16-step grid in the editor (editing and playhead) |
+| `HelpOverlay.h` | Quick-help page opened by the editor's ? button |
 | `tests/StepSequencerTests.cpp` | Unit tests for the sequencer engine (`-DBASICSYNTH_BUILD_TESTS=ON`) |
 | `Visualisers.h` | Oscilloscope, spectrum analyser, ADSR graph, voice lights and L/R meter (message thread only) |
 | `CMakeLists.txt` | Build config — Standalone + VST3, JUCE path, binary resources |
