@@ -58,6 +58,19 @@ juce::AudioProcessorValueTreeState::ParameterLayout BasicSynthAudioProcessor::cr
 
     // Stereo spread of voices by pitch: 0 = mono, 1 = notes two octaves from middle C hard-panned.
     layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "width", 1 }, "Stereo Width", 0.0f, 1.0f, 0.6f));
+
+    // Step sequencer. Off by default so the plugin behaves exactly as before until enabled.
+    layout.add (std::make_unique<AudioParameterBool>   (ParameterID { "seqOn",   1 }, "Sequencer On",   false));
+    layout.add (std::make_unique<AudioParameterBool>   (ParameterID { "seqSync", 1 }, "Sequencer Sync", true));    // follow the host transport when it has one
+    layout.add (std::make_unique<AudioParameterFloat>  (ParameterID { "seqTempo", 1 }, "Sequencer Tempo",
+                                                         NormalisableRange<float> (40.0f, 240.0f, 0.1f), 120.0f));   // BPM, internal clock
+    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { "seqRate", 1 }, "Sequencer Rate",
+                                                         StringArray { "1/8", "1/16", "1/32", "1/8T", "1/16T" }, 1));  // order matches StepSequencer::Rate
+    layout.add (std::make_unique<AudioParameterFloat>  (ParameterID { "seqSwing", 1 }, "Sequencer Swing", 0.0f, 1.0f, 0.0f));
+    layout.add (std::make_unique<AudioParameterFloat>  (ParameterID { "seqGate",  1 }, "Sequencer Gate",
+                                                         NormalisableRange<float> (0.05f, 1.0f), 0.5f));
+    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { "seqMode", 1 }, "Sequencer Mode",
+                                                         StringArray { "Layer", "Replace", "Transpose" }, 0));        // order matches SequencerMode
     return layout;
 }
 
@@ -79,6 +92,15 @@ BasicSynthAudioProcessor::BasicSynthAudioProcessor()
     releaseParameter       = getTypedParameter<juce::AudioParameterFloat>  (apvts, "release");
     gainParameter          = getTypedParameter<juce::AudioParameterFloat>  (apvts, "gain");
     widthParameter         = getTypedParameter<juce::AudioParameterFloat>  (apvts, "width");
+    seqOnParameter         = getTypedParameter<juce::AudioParameterBool>   (apvts, "seqOn");
+    seqSyncParameter       = getTypedParameter<juce::AudioParameterBool>   (apvts, "seqSync");
+    seqTempoParameter      = getTypedParameter<juce::AudioParameterFloat>  (apvts, "seqTempo");
+    seqRateParameter       = getTypedParameter<juce::AudioParameterChoice> (apvts, "seqRate");
+    seqSwingParameter      = getTypedParameter<juce::AudioParameterFloat>  (apvts, "seqSwing");
+    seqGateParameter       = getTypedParameter<juce::AudioParameterFloat>  (apvts, "seqGate");
+    seqModeParameter       = getTypedParameter<juce::AudioParameterChoice> (apvts, "seqMode");
+
+    loadDefaultPattern();
 
     if (const auto path = findMidiLogPath (wrapperType); path.isNotEmpty())
         midiLogger.start (juce::File::getCurrentWorkingDirectory().getChildFile (path));
@@ -95,6 +117,11 @@ void BasicSynthAudioProcessor::prepareToPlay (double sampleRate, int samplesPerB
     outputGain.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (gainParameter->get()));
 
     midiLogger.setSampleRate (sampleRate);
+
+    sequencer.prepare (sampleRate);
+    playMidi.ensureSize (8192);   // bytes; far more than a block of keyboard + sequencer events needs
+    internalBeat   = 0.0;
+    numHeldKeys    = 0;
 }
 
 void BasicSynthAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
@@ -124,7 +151,9 @@ void BasicSynthAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, j
     // and calls its startNote() with that note number and velocity.
 
     // Voices render straight into 'buffer', so any host block size is safe.
-    synth.renderNextBlock (buffer, midiMessages, 0, numSamples);
+    // The synth plays the keyboard (filtered by the sequencer mode) plus the sequencer.
+    buildPlayMidi (midiMessages, numSamples);
+    synth.renderNextBlock (buffer, playMidi, 0, numSamples);
 
     outputGain.setTargetValue (juce::Decibels::decibelsToGain (gainParameter->get()));
     outputGain.applyGain (buffer, numSamples);
@@ -179,16 +208,190 @@ bool BasicSynthAudioProcessor::isBusesLayoutSupported (const BusesLayout& layout
     return out == juce::AudioChannelSet::stereo() || out == juce::AudioChannelSet::mono();
 }
 
+//==============================================================================
+// Step sequencer
+
+namespace
+{
+    // State tree layout for the pattern: <Pattern><Step on="1" note="48" velocity="110"/> x16</Pattern>
+    const juce::Identifier patternId  { "Pattern" };
+    const juce::Identifier stepId     { "Step" };
+    const juce::Identifier onId       { "on" };
+    const juce::Identifier noteId     { "note" };
+    const juce::Identifier velocityId { "velocity" };
+
+    /** Notes are transposed relative to this key in Transpose mode (C4). */
+    constexpr int transposeReferenceNote = 60;
+}
+
+void BasicSynthAudioProcessor::loadDefaultPattern() noexcept
+{
+    // A C-minor bassline around C3 with octave jumps; notes are kept on the
+    // "off" steps too, so switching a step on gives a sensible pitch.
+    const StepSequencer::Step pattern[StepSequencer::numSteps] =
+    {
+        { true, 48, 112 }, { false, 48, 90 }, { true, 60, 80 },  { true, 48, 100 },
+        { true, 51, 112 }, { false, 51, 90 }, { true, 55, 90 },  { true, 58, 80 },
+        { true, 48, 112 }, { false, 48, 90 }, { true, 60, 80 },  { true, 48, 100 },
+        { true, 53, 112 }, { false, 53, 90 }, { true, 55, 90 },  { true, 51, 80 },
+    };
+
+    for (int i = 0; i < StepSequencer::numSteps; ++i)
+        sequencer.setStep (i, pattern[i]);
+}
+
+void BasicSynthAudioProcessor::setSequencerStep (int index, const StepSequencer::Step& step)
+{
+    sequencer.setStep (index, step);
+    updateHostDisplay (ChangeDetails().withNonParameterStateChanged (true));
+}
+
+void BasicSynthAudioProcessor::trackHeldKey (int note, bool isDown) noexcept
+{
+    // Remove the key if present, then (for a key-down) append it as the most recent.
+    for (int i = 0; i < numHeldKeys; ++i)
+    {
+        if (heldKeys[(size_t) i] == note)
+        {
+            for (int j = i + 1; j < numHeldKeys; ++j)
+                heldKeys[(size_t) (j - 1)] = heldKeys[(size_t) j];
+            --numHeldKeys;
+            break;
+        }
+    }
+
+    if (isDown && numHeldKeys < (int) heldKeys.size())
+        heldKeys[(size_t) numHeldKeys++] = note;
+}
+
+void BasicSynthAudioProcessor::buildPlayMidi (const juce::MidiBuffer& input, int numSamples) noexcept
+{
+    playMidi.clear();
+
+    const bool sequencerOn = seqOnParameter->get();
+    const auto mode = sequencerOn ? (SequencerMode) seqModeParameter->getIndex() : SequencerMode::layer;
+
+    if (mode != SequencerMode::transpose)
+        numHeldKeys = 0;   // forget keys held under another mode
+
+    // 1. Keyboard input. Layer passes everything through; Replace and Transpose
+    //    keep controllers, pitch bend and so on, but take note messages out of
+    //    the synth's path (Transpose uses them to steer the pattern instead).
+    for (const auto event : input)
+    {
+        const int  status = event.numBytes >= 3 ? (event.data[0] & 0xf0) : 0;
+        const bool noteOn = status == 0x90 && event.data[2] > 0;
+        const bool isNote = noteOn || status == 0x80 || status == 0x90;
+
+        if (isNote && mode == SequencerMode::transpose)
+            trackHeldKey (event.data[1], noteOn);
+
+        if (! isNote || mode == SequencerMode::layer)
+            playMidi.addEvent (event.data, event.numBytes, event.samplePosition);
+    }
+
+    // 2. Musical time: the host transport when Sync is on and the host reports
+    //    one (a DAW), otherwise the internal clock at the Tempo parameter
+    //    (the Standalone, or Sync off). The internal clock restarts at beat 0
+    //    each time the sequencer is switched on.
+    if (sequencerOn && ! wasSequencerOn)
+        internalBeat = 0.0;
+    wasSequencerOn = sequencerOn;
+
+    StepSequencer::Transport transport;
+    bool followsHost = false;
+
+    if (seqSyncParameter->get())
+    {
+        if (auto* hostPlayHead = getPlayHead())
+        {
+            if (const auto position = hostPlayHead->getPosition(); position.hasValue())
+            {
+                const auto ppq = position->getPpqPosition();
+                const auto bpm = position->getBpm();
+
+                if (ppq.hasValue() && bpm.hasValue())
+                {
+                    transport   = { position->getIsPlaying(), *ppq, *bpm };
+                    followsHost = true;
+                }
+            }
+        }
+    }
+
+    if (! followsHost)
+    {
+        const double tempo = seqTempoParameter->get();
+        transport = { true, internalBeat, tempo };
+        internalBeat += (double) numSamples * tempo / (60.0 * getSampleRate());
+    }
+
+    transport.playing = transport.playing && sequencerOn;   // switching off releases sounding notes
+    sequencerTempo.store ((float) transport.bpm, std::memory_order_relaxed);
+    sequencerFollowsHost.store (followsHost, std::memory_order_relaxed);
+
+    // 3. The sequencer's own events.
+    StepSequencer::Settings settings;
+    settings.rate  = (StepSequencer::Rate) seqRateParameter->getIndex();
+    settings.swing = seqSwingParameter->get();
+    settings.gate  = seqGateParameter->get();
+
+    if (mode == SequencerMode::transpose)
+    {
+        // Steered by the most recently pressed key that is still held; silent with no key down.
+        settings.triggersEnabled = numHeldKeys > 0;
+        settings.transpose = numHeldKeys > 0 ? heldKeys[(size_t) (numHeldKeys - 1)] - transposeReferenceNote : 0;
+    }
+
+    sequencer.process (playMidi, numSamples, transport, settings);
+}
+
+//==============================================================================
+// State
+
 void BasicSynthAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
-    if (auto xml = apvts.copyState().createXml())
+    // Parameters and GUI state come from the APVTS; the pattern is added as a
+    // child tree because its 16 steps are not host parameters.
+    auto state = apvts.copyState();
+
+    if (auto previous = state.getChildWithName (patternId); previous.isValid())
+        state.removeChild (previous, nullptr);
+
+    juce::ValueTree pattern (patternId);
+    for (int i = 0; i < StepSequencer::numSteps; ++i)
+    {
+        const auto s = sequencer.getStep (i);
+        juce::ValueTree step (stepId);
+        step.setProperty (onId,       s.on,       nullptr);
+        step.setProperty (noteId,     s.note,     nullptr);
+        step.setProperty (velocityId, s.velocity, nullptr);
+        pattern.appendChild (step, nullptr);
+    }
+    state.appendChild (pattern, nullptr);
+
+    if (auto xml = state.createXml())
         copyXmlToBinary (*xml, destData);
 }
 
 void BasicSynthAudioProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
-    if (auto xml = getXmlFromBinary (data, sizeInBytes); xml != nullptr && xml->hasTagName (apvts.state.getType()))
-        apvts.replaceState (juce::ValueTree::fromXml (*xml));
+    auto xml = getXmlFromBinary (data, sizeInBytes);
+    if (xml == nullptr || ! xml->hasTagName (apvts.state.getType()))
+        return;
+
+    const auto tree = juce::ValueTree::fromXml (*xml);
+    apvts.replaceState (tree);
+
+    // Sessions saved before the sequencer existed have no pattern: keep the default.
+    const auto pattern = tree.getChildWithName (patternId);
+    for (int i = 0; i < juce::jmin (StepSequencer::numSteps, pattern.getNumChildren()); ++i)
+    {
+        const auto step = pattern.getChild (i);
+        sequencer.setStep (i, { (bool) step.getProperty (onId, false),
+                                (int)  step.getProperty (noteId, 60),
+                                (int)  step.getProperty (velocityId, 100) });
+    }
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()

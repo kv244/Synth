@@ -2,6 +2,7 @@
 #include <JuceHeader.h>
 #include "BasicSynth.h"
 #include "MidiLogger.h"
+#include "StepSequencer.h"
 
 class BasicSynthAudioProcessor : public juce::AudioProcessor
 {
@@ -56,6 +57,36 @@ public:
     const std::array<VoiceView, numVoices>& getVoiceViews() const noexcept { return voiceViews; }
 
     //==========================================================================
+    // Step sequencer (see StepSequencer.h for the engine and its timing model)
+
+    /** How the keyboard and the sequencer share the synth (the Sequencer Mode parameter). */
+    enum class SequencerMode
+    {
+        layer,      ///< sequencer and keyboard both play
+        replace,    ///< sequencer plays, keyboard notes are ignored
+        transpose   ///< the pattern plays only while a key is held, shifted by (key - C4)
+    };
+
+    /** Reads a step of the pattern. Any thread. */
+    StepSequencer::Step getSequencerStep (int index) const noexcept   { return sequencer.getStep (index); }
+
+    /**
+        Edits a step of the pattern. Message thread: besides the lock-free
+        store, it tells the host the plugin state changed so the project is
+        marked as modified.
+    */
+    void setSequencerStep (int index, const StepSequencer::Step& step);
+
+    /** Step that most recently started, or -1 while the sequencer is stopped. Any thread. */
+    int getSequencerPlayhead() const noexcept   { return sequencer.getCurrentStep(); }
+
+    /** Tempo the sequencer followed in the last block (host or internal), for display. */
+    float getSequencerTempo() const noexcept    { return sequencerTempo.load (std::memory_order_relaxed); }
+
+    /** True when the last block was clocked by the host transport rather than the internal tempo. */
+    bool isSequencerFollowingHost() const noexcept   { return sequencerFollowsHost.load (std::memory_order_relaxed); }
+
+    //==========================================================================
     // Scope data: audio thread writes, editor timer (message thread) reads.
     static constexpr int scopeFifoSize = 1 << 15;   // ~0.7 s at 48 kHz
 
@@ -78,6 +109,27 @@ private:
 
     void publishVoiceViews() noexcept;
 
+    /**
+        Builds the MIDI the synth will play this block: keyboard input filtered
+        by the sequencer mode, plus the sequencer's own events. Audio thread.
+    */
+    void buildPlayMidi (const juce::MidiBuffer& input, int numSamples) noexcept;
+
+    /** Keeps the list of held keys up to date (Transpose mode). */
+    void trackHeldKey (int note, bool isDown) noexcept;
+
+    /** Fills the pattern with the default bassline (used until a session supplies one). */
+    void loadDefaultPattern() noexcept;
+
+    StepSequencer    sequencer;
+    juce::MidiBuffer playMidi;                 // keyboard + sequencer events for the synth; capacity reserved in prepareToPlay
+    double internalBeat   = 0.0;               // internal clock position in beats
+    bool   wasSequencerOn = false;
+    std::array<int, 16> heldKeys {};           // Transpose mode: keys currently down, most recent last
+    int    numHeldKeys = 0;
+    std::atomic<float> sequencerTempo { 120.0f };
+    std::atomic<bool>  sequencerFollowsHost { false };
+
     juce::AudioProcessorValueTreeState apvts;
 
     juce::AudioParameterChoice* waveformParameter      = nullptr;
@@ -89,6 +141,14 @@ private:
     juce::AudioParameterFloat*  releaseParameter       = nullptr;
     juce::AudioParameterFloat*  gainParameter          = nullptr;
     juce::AudioParameterFloat*  widthParameter         = nullptr;
+
+    juce::AudioParameterBool*   seqOnParameter         = nullptr;
+    juce::AudioParameterBool*   seqSyncParameter       = nullptr;
+    juce::AudioParameterFloat*  seqTempoParameter      = nullptr;
+    juce::AudioParameterChoice* seqRateParameter       = nullptr;
+    juce::AudioParameterFloat*  seqSwingParameter      = nullptr;
+    juce::AudioParameterFloat*  seqGateParameter       = nullptr;
+    juce::AudioParameterChoice* seqModeParameter       = nullptr;
 
     juce::SmoothedValue<float> outputGain { 1.0f };
 

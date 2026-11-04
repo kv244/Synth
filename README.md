@@ -20,7 +20,8 @@ by **Razvan Julian Petrescu** / **AudioDSP**.
 - **Output gain** — host-automatable output level (−48 dB to +6 dB)
 - **Stereo width** — voices are panned by pitch (middle C centred, two octaves either side at the edges); 0% is mono, 100% full spread
 - **Visualisers** — triggered oscilloscope locked to the lowest held note, spectrum analyser with the live filter curve, ADSR shape with a dot per sounding voice, 16 voice lights and an L/R output meter with peak hold and clip light
-- **Custom neon GUI** — background image, cyan/magenta/amber controls; resizable from 75% to 200%
+- **16-step sequencer** — sample-accurate, synced to the host transport or its own tempo, with swing, gate, five step rates and three keyboard modes (Layer / Replace / Transpose); the pattern is saved with the session
+- **Custom neon GUI** — background image, cyan/magenta/amber controls; resizable from 75% to 200%; a **?** button opens quick help
 - **MIDI** — works with any MIDI controller or keyboard
 - **MIDI Logging** — optional, real-time-safe logging of received MIDI messages to a file (`BASICSYNTH_MIDILOG=<file>`, or `--midilog <file>` in the Standalone)
 - **DAW automation** — all parameters are automatable in VST3 hosts
@@ -83,6 +84,10 @@ cmake --build build --config Release
 Run `BasicSynth.exe`. Click **Options → Audio/MIDI Settings** to select your
 audio output and MIDI input device, then play from any connected MIDI keyboard.
 
+**No MIDI keyboard?** Press **RUN** — the step sequencer plays its pattern on its own. To play notes, use a virtual keyboard such as [VMPK](https://vmpk.sourceforge.io/) routed through [loopMIDI](https://www.tobias-erichsen.de/software/loopmidi.html), then tick the loopMIDI port under MIDI inputs.
+
+**No sound?** Check that the output device is selected and its channels are ticked under *Active output channels*. Laptop speakers reproduce very little below about 200 Hz, so low notes on the Sine or Triangle waveform can be almost inaudible — switch to Sawtooth or Square, raise the notes, or use headphones. The **?** button in the top-right corner has these tips too.
+
 You can also launch the standalone application with the `--midilog <file>` parameter, or set the `BASICSYNTH_MIDILOG` environment variable, to log real-time MIDI input:
 ```bash
 BasicSynth.exe --midilog log.txt
@@ -107,6 +112,31 @@ the **AudioDSP** manufacturer in your DAW's instrument browser.
 | Meter | Cyan | Left / right output level with peak hold; the red light marks clipping (click the meter to reset) |
 | Gain | Cyan | Output level, −48 dB to +6 dB |
 | Width | Cyan | Stereo spread of voices by pitch, 0–100% |
+| ? | Cyan | Quick help drawn over the window — sequencer editing, modes, controls and no-sound tips. Click anywhere or press Esc to close |
+
+---
+
+## Step Sequencer
+
+A 16-step sequencer sits along the bottom of the window. It is **off by default**: press **RUN** to start it.
+
+| Control | Description |
+|---|---|
+| RUN | Starts / stops the sequencer (lit amber while running). Stopping releases any sounding notes at once. |
+| SYNC | Lit = on. On: follow the host's tempo and transport (the pattern locks to the DAW's bars and stops when the DAW stops). The readout then shows `HOST` and the host tempo. If the host has no transport — e.g. the Standalone — the sequencer uses TEMPO instead. Off: always use TEMPO. |
+| TEMPO | Internal tempo, 40–240 BPM. |
+| Rate | Step length: 1/8, 1/16, 1/32, 1/8T or 1/16T. |
+| Mode | **Layer** — sequencer and keyboard both play. **Replace** — keyboard notes are ignored. **Transpose** — the pattern plays only while a key is held, shifted by (key − C4); the most recently pressed key wins. |
+| Step grid | Click a step to switch it on/off. Drag up/down to change its note, shift-drag (or right-drag) to change its velocity; the mouse wheel nudges the note (with shift, the velocity). The cyan outline is the playhead; brighter top edges mark the beats. |
+| SWING | Delays every odd step by up to half a step (about 33% gives a triplet feel). |
+| GATE | Note length as a fraction of a step, 5–100%. |
+
+Notes on behaviour:
+
+- Every step is placed on an exact sample, derived from the transport each block, so timing does not drift and does not depend on the host's buffer size.
+- The sequencer plays on MIDI channel 16, so its note-offs never cut off a note of the same pitch that you are playing on the keyboard.
+- The pattern (16 × on / note / velocity) is saved in the plugin state with the session and presets. Sessions saved with earlier versions load with the default pattern.
+- The engine is `StepSequencer.h`; it depends only on `juce_audio_basics` and is covered by its own unit tests (`tests/StepSequencerTests.cpp`, built with `-DBASICSYNTH_BUILD_TESTS=ON`).
 
 ---
 
@@ -131,7 +161,7 @@ Expected output:
 
 ```
 Loading plugin …
-Parameters: ['waveform', 'cutoff', 'filter_enabled', 'attack', 'decay', 'sustain', 'release', 'output_gain_db', 'stereo_width', 'bypass']
+Parameters: ['waveform', 'cutoff', 'filter_enabled', 'attack', 'decay', 'sustain', 'release', 'output_gain_db', 'stereo_width', 'sequencer_on', 'sequencer_sync', 'sequencer_tempo', 'sequencer_rate', 'sequencer_swing', 'sequencer_gate', 'sequencer_mode', 'bypass']
 
   PASS  Single note             RMS=0.0799
   PASS  Polyphony (4ch)         single=0.0799  chord=0.1596
@@ -141,8 +171,10 @@ Parameters: ['waveform', 'cutoff', 'filter_enabled', 'attack', 'decay', 'sustain
   PASS  Filter cutoff           HFR@1.5kHz  200Hz=0.0000  18kHz=0.0283
   PASS  Waveforms               Sine=0.0000  Square=0.0154  Triangle=0.0000  Sawtooth=0.0245
   PASS  Velocity scaling        vel20=0.0160  vel120=0.0959
+  PASS  Sequencer plays         on RMS=0.1145  off RMS=0.000000
+  PASS  Sequencer timing        12 notes, worst timing error 1.16 ms
 
-8/8 passed
+10/10 passed
 ```
 
 ### Render and hear audio
@@ -216,6 +248,8 @@ a fixed 120 BPM tempo, with real time preserved via tick timing.
 | Filter cutoff | High-frequency energy is lower at 200 Hz cutoff than at 18 kHz |
 | Waveforms | Sine, Square, Triangle, Sawtooth produce distinct harmonic content |
 | Velocity scaling | Higher velocity produces proportionally louder output |
+| Sequencer plays | With the sequencer on, the pattern plays with no MIDI input; with it off, the output is silent |
+| Sequencer timing | At 120 BPM in 1/8 steps, every note of the default pattern starts on its step (within 5 ms) |
 
 ### Using the API directly
 
@@ -283,6 +317,10 @@ audio_bright = plugin.process(msgs, 2.5, SR, reset=True)
 | `BasicSynthProcessor.h/cpp` | `AudioProcessor` — parameter management, MIDI, state |
 | `BasicSynthEditor.h` | Neon UI — layout, controls, resizing, the 30 Hz timer that feeds the visualisers |
 | `MidiLogger.h` | Real-time-safe MIDI logging (lock-free FIFO + background writer thread) |
+| `StepSequencer.h` | Step sequencer engine — timing, swing, gate, note-off queue, lock-free pattern |
+| `SequencerView.h` | The 16-step grid in the editor (editing and playhead) |
+| `HelpOverlay.h` | Quick-help page opened by the editor's ? button |
+| `tests/StepSequencerTests.cpp` | Unit tests for the sequencer engine (`-DBASICSYNTH_BUILD_TESTS=ON`) |
 | `Visualisers.h` | Oscilloscope, spectrum analyser, ADSR graph, voice lights and L/R meter (message thread only) |
 | `CMakeLists.txt` | Build config — Standalone + VST3, JUCE path, binary resources |
 | `gui_background.png` | Neon grid background image (embedded as binary data) |

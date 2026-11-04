@@ -244,6 +244,96 @@ def test_velocity_scaling(plugin):
 
 
 # ---------------------------------------------------------------------------
+# Step sequencer
+# ---------------------------------------------------------------------------
+
+# Steps that are on in the plugin's default pattern (see loadDefaultPattern()).
+DEFAULT_PATTERN_ON_STEPS = [0, 2, 3, 4, 6, 7, 8, 10, 11, 12, 14, 15]
+
+
+def find_param(plugin, *words: str) -> str:
+    """Return the name of the parameter whose name contains all of `words`.
+
+    pedalboard turns display names into identifiers ("Sequencer On" ->
+    "sequencer_on"), so matching on words keeps the tests independent of
+    the exact spelling."""
+    for name in plugin.parameters:
+        if all(w in name.lower() for w in words):
+            return name
+    raise AssertionError(f"No parameter matching {words} in {list(plugin.parameters)}")
+
+
+class SequencerOn:
+    """Context manager: switch the sequencer on (internal clock), restore every parameter afterwards."""
+
+    def __init__(self, plugin, **raw_values):
+        self.plugin = plugin
+        self.raw_values = raw_values
+
+    def __enter__(self):
+        self.saved = {name: p.raw_value for name, p in self.plugin.parameters.items()}
+        self.plugin.parameters[find_param(self.plugin, "sequencer", "on")].raw_value = 1.0
+        self.plugin.parameters[find_param(self.plugin, "sequencer", "sync")].raw_value = 0.0  # internal tempo
+        for name, value in self.raw_values.items():
+            self.plugin.parameters[name].raw_value = value
+        return self.plugin
+
+    def __exit__(self, *exc):
+        for name, value in self.saved.items():
+            self.plugin.parameters[name].raw_value = value
+        return False
+
+
+def onset_times(audio: np.ndarray, frame: int = 64) -> list[float]:
+    """Times (s) where the signal rises out of silence: crude but robust for gated notes."""
+    mono = np.abs(audio[0] + audio[1])
+    frames = len(mono) // frame
+    env = mono[: frames * frame].reshape(frames, frame).max(axis=1)
+    threshold = 0.1 * env.max()
+    quiet_frames_needed = int(0.02 * SAMPLE_RATE / frame)  # 20 ms of quiet before a new onset
+    onsets, quiet = [], quiet_frames_needed
+    for i, level in enumerate(env):
+        if level > threshold:
+            if quiet >= quiet_frames_needed:
+                onsets.append(i * frame / SAMPLE_RATE)
+            quiet = 0
+        else:
+            quiet += 1
+    return onsets
+
+
+def test_sequencer_plays(plugin):
+    """With the sequencer on, the synth plays the pattern with no MIDI input at all."""
+    set_params(plugin)
+    with SequencerOn(plugin):
+        audio = plugin.process([], 2.0, SAMPLE_RATE, reset=True)
+    r = rms(audio)
+    assert r > 1e-3, f"Sequencer produced no sound — RMS {r:.6f}"
+    silent = rms(plugin.process([], 1.0, SAMPLE_RATE, reset=True))
+    assert silent < 1e-5, f"Sound with the sequencer off and no MIDI — RMS {silent:.6f}"
+    return f"on RMS={r:.4f}  off RMS={silent:.6f}"
+
+
+def test_sequencer_timing(plugin):
+    """At 120 BPM in 1/8 steps, notes start exactly on the pattern's steps (0.25 s apart)."""
+    set_params(plugin, filter_on=False)
+    fast_envelope = {
+        find_param(plugin, "attack"): 0.0,     # 1 ms
+        find_param(plugin, "release"): 0.0,    # 1 ms, so each gated note ends cleanly
+        find_param(plugin, "sequencer", "rate"): 0.0,   # 1/8 (first choice)
+    }
+    with SequencerOn(plugin, **fast_envelope):
+        audio = plugin.process([], 4.0, SAMPLE_RATE, reset=True)   # 16 steps at 1/8, 120 BPM
+
+    expected = [s * 0.25 for s in DEFAULT_PATTERN_ON_STEPS]
+    found = onset_times(audio)
+    assert len(found) == len(expected), f"Expected {len(expected)} notes, found {len(found)}: {found}"
+    worst = max(abs(f - e) for f, e in zip(found, expected))
+    assert worst < 0.005, f"Onsets off by up to {worst * 1000:.1f} ms"
+    return f"{len(found)} notes, worst timing error {worst * 1000:.2f} ms"
+
+
+# ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
 
@@ -256,6 +346,8 @@ TESTS = [
     ("Filter cutoff",     test_filter_low_cutoff),
     ("Waveforms",         test_waveforms),
     ("Velocity scaling",  test_velocity_scaling),
+    ("Sequencer plays",   test_sequencer_plays),
+    ("Sequencer timing",  test_sequencer_timing),
 ]
 
 

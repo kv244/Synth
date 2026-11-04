@@ -2,16 +2,23 @@
 #include <JuceHeader.h>
 #include "BasicSynthProcessor.h"
 #include "Visualisers.h"
+#include "SequencerView.h"
+#include "HelpOverlay.h"
 
 /**
     Neon Synth editor.
 
-    Laid out on a fixed 760 x 400 design grid and scaled uniformly, so the
+    Laid out on a fixed 760 x 520 design grid and scaled uniformly, so the
     window can be resized (fixed aspect ratio) without any layout logic beyond
     one scale factor.
 
     Left column: oscillator, envelope (shape + knobs), filter, voice lights.
     Right column: scope / spectrum, stereo meter, output gain and stereo width.
+    Bottom strip: the step sequencer - run / sync / tempo / rate / mode on the
+    first row, the 16-step grid, then swing and gate.
+
+    The "?" button in the top-right corner opens HelpOverlay, a quick-reference
+    page drawn over the whole editor.
 
     A 30 Hz timer drains the processor's lock-free scope FIFO and reads the
     per-voice atomics; it is the only path from audio to GUI.
@@ -21,7 +28,7 @@ class BasicSynthEditor : public juce::AudioProcessorEditor,
 {
 public:
     explicit BasicSynthEditor (BasicSynthAudioProcessor& p)
-        : AudioProcessorEditor (&p), processor (p), apvts (p.getAPVTS())
+        : AudioProcessorEditor (&p), processor (p), apvts (p.getAPVTS()), stepGrid (p)
     {
         backgroundImage = juce::ImageCache::getFromMemory (BinaryData::gui_background_png,
                                                            BinaryData::gui_background_pngSize);
@@ -34,6 +41,9 @@ public:
         filterValue  = apvts.getRawParameterValue ("filterEnabled");
         gainValue    = apvts.getRawParameterValue ("gain");
         widthValue   = apvts.getRawParameterValue ("width");
+        seqTempoValue = apvts.getRawParameterValue ("seqTempo");
+        seqSwingValue = apvts.getRawParameterValue ("seqSwing");
+        seqGateValue  = apvts.getRawParameterValue ("seqGate");
 
         // ── Oscillator ───────────────────────────────────────────────────────
         addAndMakeVisible (waveformCombo);
@@ -118,6 +128,71 @@ public:
         widthAttachment = std::make_unique<SliderAttachment> (apvts, "width", widthSlider);
         setUpReadout (widthReadout, neon::cyan, juce::Justification::centredRight);
 
+        // ── Step sequencer ───────────────────────────────────────────────────
+        // RUN and SYNC are latching buttons (lit = on) rather than tick boxes,
+        // so they read as transport controls. ButtonAttachment works with any
+        // juce::Button whose clicks toggle its state.
+        for (auto* toggle : { &seqOnButton, &seqSyncButton })
+        {
+            toggle->setClickingTogglesState (true);
+            toggle->setColour (juce::TextButton::buttonColourId,   juce::Colours::transparentBlack);
+            toggle->setColour (juce::TextButton::buttonOnColourId, neon::amber.withAlpha (0.30f));
+            toggle->setColour (juce::TextButton::textColourOffId,  neon::amber.withAlpha (0.55f));
+            toggle->setColour (juce::TextButton::textColourOnId,   neon::amber);
+            toggle->setColour (juce::ComboBox::outlineColourId,    neon::amber.withAlpha (0.6f));
+            addAndMakeVisible (toggle);
+        }
+        seqOnButton.setTooltip ("Run the step sequencer");
+        seqSyncButton.setTooltip ("Follow the host's tempo and transport when it has one; otherwise use TEMPO");
+        seqOnAttachment   = std::make_unique<ButtonAttachment> (apvts, "seqOn",   seqOnButton);
+        seqSyncAttachment = std::make_unique<ButtonAttachment> (apvts, "seqSync", seqSyncButton);
+
+        setUpLinearSlider (seqTempoSlider, neon::amber);
+        seqTempoAttachment = std::make_unique<SliderAttachment> (apvts, "seqTempo", seqTempoSlider);
+        setUpReadout (seqTempoReadout, neon::amber, juce::Justification::centredRight);
+
+        for (auto* combo : { &seqRateCombo, &seqModeCombo })
+        {
+            combo->setColour (juce::ComboBox::outlineColourId, neon::amber);
+            combo->setColour (juce::ComboBox::textColourId,    neon::amber);
+            combo->setColour (juce::ComboBox::arrowColourId,   neon::amber);
+            addAndMakeVisible (combo);
+        }
+        seqRateCombo.addItemList ({ "1/8", "1/16", "1/32", "1/8T", "1/16T" }, 1);   // same order as the parameter
+        seqModeCombo.addItemList ({ "Layer", "Replace", "Transpose" }, 1);
+        seqRateCombo.setTooltip ("Step length");
+        seqModeCombo.setTooltip ("Layer: sequencer + keyboard.  Replace: keyboard ignored.  "
+                                 "Transpose: the pattern plays while a key is held, shifted by (key - C4).");
+        seqRateAttachment = std::make_unique<ComboBoxAttachment> (apvts, "seqRate", seqRateCombo);
+        seqModeAttachment = std::make_unique<ComboBoxAttachment> (apvts, "seqMode", seqModeCombo);
+
+        addAndMakeVisible (stepGrid);
+
+        setUpLinearSlider (seqSwingSlider, neon::amber);
+        seqSwingAttachment = std::make_unique<SliderAttachment> (apvts, "seqSwing", seqSwingSlider);
+        setUpReadout (seqSwingReadout, neon::amber, juce::Justification::centredRight);
+
+        setUpLinearSlider (seqGateSlider, neon::amber);
+        seqGateAttachment = std::make_unique<SliderAttachment> (apvts, "seqGate", seqGateSlider);
+        setUpReadout (seqGateReadout, neon::amber, juce::Justification::centredRight);
+
+        // Help: "?" toggles the overlay; the overlay un-toggles the button when it closes itself.
+        helpButton.setClickingTogglesState (true);
+        helpButton.setTooltip ("Quick help");
+        helpButton.setColour (juce::TextButton::buttonColourId,   juce::Colours::transparentBlack);
+        helpButton.setColour (juce::TextButton::buttonOnColourId, neon::cyan.withAlpha (0.25f));
+        helpButton.setColour (juce::TextButton::textColourOffId,  neon::cyan);
+        helpButton.setColour (juce::TextButton::textColourOnId,   neon::cyan);
+        helpButton.setColour (juce::ComboBox::outlineColourId,    neon::cyan.withAlpha (0.6f));
+        helpButton.onClick = [this]
+        {
+            if (helpButton.getToggleState()) helpOverlay.show();
+            else                             helpOverlay.setVisible (false);
+        };
+        helpOverlay.onClose = [this] { helpButton.setToggleState (false, juce::dontSendNotification); };
+        addAndMakeVisible (helpButton);
+        addChildComponent (helpOverlay);   // added last, so it sits above every control
+
         // The chosen view is GUI state, saved with the plugin's state but not automatable.
         setView ((int) apvts.state.getProperty (viewPropertyId, 0));
 
@@ -179,8 +254,25 @@ public:
         place (widthSlider,    452, 362, 228, 24);
         place (widthReadout,   680, 366, 60, 16);
 
+        // Sequencer strip
+        place (seqOnButton,     135, 400, 62, 22);
+        place (seqSyncButton,   200, 400, 66, 22);
+        place (seqTempoSlider,  316, 400, 150, 22);
+        place (seqTempoReadout, 466, 403, 84, 16);
+        place (seqRateCombo,    560, 400, 70, 22);
+        place (seqModeCombo,    636, 400, 104, 22);
+        place (stepGrid,        30, 430, 710, 50);
+        place (seqSwingSlider,  80, 486, 230, 22);
+        place (seqSwingReadout, 310, 489, 60, 16);
+        place (seqGateSlider,   446, 486, 234, 22);
+        place (seqGateReadout,  680, 489, 60, 16);
+
+        place (helpButton, 712, 12, 28, 24);
+        helpOverlay.setBounds (getLocalBounds());
+
         for (auto* label : { &attackReadout, &decayReadout, &sustainReadout, &releaseReadout,
-                             &cutoffReadout, &gainReadout, &widthReadout })
+                             &cutoffReadout, &gainReadout, &widthReadout,
+                             &seqTempoReadout, &seqSwingReadout, &seqGateReadout })
             label->setFont (neon::font (11.0f * s));
     }
 
@@ -212,6 +304,17 @@ public:
         g.drawText ("GAIN",  400, 338, 50, 20, juce::Justification::left);
         g.drawText ("WIDTH", 400, 364, 50, 20, juce::Justification::left);
 
+        // Sequencer strip
+        g.setColour (neon::amber.withAlpha (0.25f));
+        g.drawHorizontalLine (394, 30.0f, 740.0f);
+        g.setColour (neon::amber);
+        g.setFont (neon::font (13.0f));
+        g.drawText ("SEQUENCER", 30, 401, 100, 20, juce::Justification::left);
+        g.setFont (neon::font (11.0f));
+        g.drawText ("TEMPO", 272, 401, 44, 20, juce::Justification::left);
+        g.drawText ("SWING", 30,  487, 50, 20, juce::Justification::left);
+        g.drawText ("GATE",  400, 487, 46, 20, juce::Justification::left);
+
         g.setColour (neon::amber);
         const char* names[] = { "ATK", "DEC", "SUS", "REL" };
         const int   knobX[] = { 30, 120, 210, 300 };
@@ -220,10 +323,12 @@ public:
     }
 
 private:
-    using SliderAttachment = juce::AudioProcessorValueTreeState::SliderAttachment;
+    using SliderAttachment   = juce::AudioProcessorValueTreeState::SliderAttachment;
+    using ButtonAttachment   = juce::AudioProcessorValueTreeState::ButtonAttachment;
+    using ComboBoxAttachment = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
 
     static constexpr int baseWidth  = 760;
-    static constexpr int baseHeight = 400;
+    static constexpr int baseHeight = 520;
     static constexpr int timerHz    = 30;
     static inline const juce::Identifier viewPropertyId { "view" };
 
@@ -281,6 +386,13 @@ private:
         const float gainDb = gainValue->load();
         set (gainReadout,  (gainDb > 0.0f ? "+" : "") + juce::String (gainDb, 1) + " dB");
         set (widthReadout, juce::String (juce::roundToInt (widthValue->load() * 100.0f)) + "%");
+
+        // Shows the tempo actually in use: the host's while following it, otherwise the TEMPO slider.
+        set (seqTempoReadout, processor.isSequencerFollowingHost()
+                                  ? "HOST " + juce::String (processor.getSequencerTempo(), 1)
+                                  : juce::String (seqTempoValue->load(), 1) + " BPM");
+        set (seqSwingReadout, juce::String (juce::roundToInt (seqSwingValue->load() * 100.0f)) + "%");
+        set (seqGateReadout,  juce::String (juce::roundToInt (seqGateValue->load() * 100.0f)) + "%");
     }
 
     void timerCallback() override
@@ -311,6 +423,7 @@ private:
 
         adsrView.update (attackValue->load(), decayValue->load(), sustainValue->load(), releaseValue->load(), voices);
         voiceLeds.update (voices);
+        stepGrid.refresh();   // pattern + playhead
         updateReadouts();
     }
 
@@ -326,6 +439,9 @@ private:
     std::atomic<float>* filterValue = nullptr;
     std::atomic<float>* gainValue = nullptr;
     std::atomic<float>* widthValue = nullptr;
+    std::atomic<float>* seqTempoValue = nullptr;
+    std::atomic<float>* seqSwingValue = nullptr;
+    std::atomic<float>* seqGateValue = nullptr;
 
     // Visualisers and their data
     SignalHistory    history;
@@ -351,6 +467,21 @@ private:
     std::unique_ptr<SliderAttachment> attackAttachment, decayAttachment, sustainAttachment, releaseAttachment,
                                       cutoffAttachment, gainAttachment, widthAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> filterToggleAttachment;
+
+    // Step sequencer
+    StepGrid           stepGrid;
+    juce::TextButton seqOnButton { "RUN" }, seqSyncButton { "SYNC" };
+    juce::Slider       seqTempoSlider, seqSwingSlider, seqGateSlider;
+    juce::ComboBox     seqRateCombo, seqModeCombo;
+    juce::Label        seqTempoReadout, seqSwingReadout, seqGateReadout;
+    std::unique_ptr<ButtonAttachment>   seqOnAttachment, seqSyncAttachment;
+    std::unique_ptr<SliderAttachment>   seqTempoAttachment, seqSwingAttachment, seqGateAttachment;
+    std::unique_ptr<ComboBoxAttachment> seqRateAttachment, seqModeAttachment;
+
+    // Help
+    juce::TextButton helpButton { "?" };
+    HelpOverlay      helpOverlay { baseWidth };
+
     std::unique_ptr<juce::ParameterAttachment> filterEnabledListener;   // last: destroyed first
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BasicSynthEditor)
