@@ -36,6 +36,8 @@ public:
     /** Time for the sustain level to slew across its full range. */
     static constexpr double sustainSlewSeconds = 0.010;
 
+    VoiceEnvelope() noexcept   { recalculateRates(); }
+
     void setSampleRate (double newSampleRate) noexcept
     {
         sampleRate     = newSampleRate > 0.0 ? newSampleRate : 44100.0;

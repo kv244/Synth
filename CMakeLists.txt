@@ -47,6 +47,7 @@ target_sources(BasicSynth
         StepSequencer.h
         SequencerView.h
         HelpOverlay.h
+        VoiceEnvelope.h
 )
 
 target_compile_definitions(BasicSynth
@@ -80,23 +81,42 @@ target_include_directories(BasicSynth
 )
 
 # ---------------------------------------------------------------------------
-# Optional unit tests for the step sequencer engine (StepSequencer.h).
-# It only needs juce_audio_basics, so it builds in a few seconds once JUCE is
-# compiled:
+# Optional unit tests for the step sequencer engine (StepSequencer.h) and the
+# voice envelope (VoiceEnvelope.h). They only need juce_audio_basics, so they
+# build in a few seconds once JUCE is compiled:
 #   cmake -B build -DJUCE_DIR=... -DBASICSYNTH_BUILD_TESTS=ON
-#   cmake --build build --config Release --target StepSequencerTests
-# The executable exits non-zero if any test fails.
+#   cmake --build build --config Release --target StepSequencerTests VoiceEnvelopeTests
+# Each executable exits non-zero if any test fails.
 # ---------------------------------------------------------------------------
-option(BASICSYNTH_BUILD_TESTS "Build the StepSequencer unit tests" OFF)
+option(BASICSYNTH_BUILD_TESTS "Build the StepSequencer and VoiceEnvelope unit tests" OFF)
 
 if(BASICSYNTH_BUILD_TESTS)
-    juce_add_console_app(StepSequencerTests PRODUCT_NAME "StepSequencerTests")
-    target_sources(StepSequencerTests PRIVATE tests/StepSequencerTests.cpp)
-    target_compile_definitions(StepSequencerTests PRIVATE
+    foreach(test StepSequencerTests VoiceEnvelopeTests)
+        juce_add_console_app(${test} PRODUCT_NAME "${test}")
+        target_sources(${test} PRIVATE tests/${test}.cpp)
+        target_compile_definitions(${test} PRIVATE
+            JUCE_WEB_BROWSER=0
+            JUCE_USE_CURL=0)
+        target_link_libraries(${test} PRIVATE
+            juce::juce_audio_basics
+            juce::juce_recommended_config_flags
+            juce::juce_recommended_warning_flags)
+    endforeach()
+
+    # Times processBlock directly (no host, no Python) for a few load scenarios.
+    juce_add_console_app(RenderBenchmark PRODUCT_NAME "RenderBenchmark")
+    juce_generate_juce_header(RenderBenchmark)
+    target_sources(RenderBenchmark PRIVATE tests/RenderBenchmark.cpp BasicSynthProcessor.cpp)
+    target_include_directories(RenderBenchmark PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+    target_compile_definitions(RenderBenchmark PRIVATE
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0)
-    target_link_libraries(StepSequencerTests PRIVATE
-        juce::juce_audio_basics
+    target_link_libraries(RenderBenchmark PRIVATE
+        BasicSynthResources
+        juce::juce_audio_utils
+        juce::juce_audio_processors
+        juce::juce_dsp
         juce::juce_recommended_config_flags
+        juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags)
 endif()
