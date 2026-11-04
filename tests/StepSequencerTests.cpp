@@ -1,7 +1,7 @@
 /*
     Unit tests for StepSequencer (sample-accurate timing, gate, swing,
-    transport stop / jump, block-size independence, triggers disabled,
-    retriggering and step packing).
+    transport stop / jump, tolerance of small transport drift, block-size
+    independence, triggers disabled, retriggering and step packing).
 
     Build with CMake:  cmake -B build -DJUCE_DIR=... -DBASICSYNTH_BUILD_TESTS=ON
                        cmake --build build --target StepSequencerTests
@@ -161,6 +161,91 @@ int main()
         for (const auto m : midi)
             if (m.getMessage().isNoteOff() && m.samplePosition == 0) releasedBeforeRestart = true;
         check (releasedBeforeRestart && seq.getCurrentStep() == 0, "a jump in time releases notes, then playback resumes at the new position");
+    }
+
+    std::printf ("Transport drift\n");
+    {
+        // Host tempo changes from 120 to 126 BPM halfway through block 20. The host's
+        // beat position follows the real tempo; each block reports the tempo at its
+        // start, so the sequencer's prediction is about 26 samples short once.
+        // Legato gate (100%), so a note is always sounding when that happens.
+        StepSequencer seq; makeAllOn (seq);
+        auto legato = settings;
+        legato.gate = 1.0f;
+        juce::MidiBuffer midi;
+        midi.ensureSize (4096);
+        const int block = 1024;
+        double hostBeat = 0.0, bpm = testBpm;
+        int ons = 0, cutShort = 0;
+        std::vector<juce::int64> onTimes;
+        juce::int64 noteOnAt[128] = {};
+        juce::int64 position = 0;
+
+        for (int b = 0; b < 200; ++b, position += block)
+        {
+            midi.clear();
+            seq.process (midi, block, { true, hostBeat, bpm }, legato);
+            for (const auto m : midi)
+            {
+                const auto msg = m.getMessage();
+                const auto at  = position + m.samplePosition;
+                if (msg.isNoteOn()) { ++ons; onTimes.push_back (at); noteOnAt[msg.getNoteNumber()] = at; }
+                else if (at - noteOnAt[msg.getNoteNumber()] < 5600)   // a full step is 5714-6000 samples
+                    ++cutShort;
+            }
+
+            const double spb = testSampleRate * 60.0 / bpm;
+            if (b == 20)   // tempo change at the block's midpoint
+            {
+                hostBeat += (block / 2) / spb;
+                bpm = 126.0;
+                hostBeat += (block / 2) / (testSampleRate * 60.0 / bpm);
+            }
+            else
+            {
+                hostBeat += block / spb;
+            }
+        }
+        bool noDuplicates = true;
+        for (size_t i = 1; i < onTimes.size(); ++i)
+            noDuplicates = noDuplicates && onTimes[i] - onTimes[i - 1] > 4000;   // steps are ~5700-6000 samples apart
+        check (cutShort == 0 && noDuplicates && ons > 30,
+               "a tempo change inside a block is not mistaken for a jump: no notes cut, none doubled");
+
+        // Beat position jittering by up to +/-1 sample every block (host rounding).
+        StepSequencer jit; makeAllOn (jit);
+        juce::Random random (1234);
+        int jitOns = 0;
+        std::vector<juce::int64> jitTimes;
+        position = 0;
+        for (int b = 0; b < 188; ++b, position += 512)   // 96256 samples: four beats (16 steps) plus a little
+        {
+            const double jitter = b == 0 ? 0.0 : (random.nextFloat() * 2.0 - 1.0) / testSamplesPerBeat;
+            midi.clear();
+            jit.process (midi, 512, { true, (double) position / testSamplesPerBeat + jitter, testBpm }, settings);
+            for (const auto m : midi)
+            {
+                const auto msg = m.getMessage();
+                const auto at  = position + m.samplePosition;
+                if (msg.isNoteOn()) { ++jitOns; jitTimes.push_back (at); noteOnAt[msg.getNoteNumber()] = at; }
+                else if (std::abs (at - noteOnAt[msg.getNoteNumber()] - 3000) > 2) ++cutShort;   // 50% gate
+            }
+        }
+        bool onGrid = jitOns == 17;   // steps 0..16
+        for (size_t i = 0; onGrid && i < jitTimes.size(); ++i)
+            onGrid = std::abs (jitTimes[i] - (juce::int64) i * 6000) <= 2;
+        check (onGrid && cutShort == 0,
+               "+/-1 sample of beat jitter: every step fires once, within 2 samples of its slot, at full length");
+
+        // A small backward drift right after a step must not fire that step again.
+        StepSequencer back; makeAllOn (back);
+        midi.clear();
+        back.process (midi, 512, { true, 5490.0 / testSamplesPerBeat, testBpm }, settings);       // step 1 (6000) at offset 510
+        midi.clear();
+        back.process (midi, 512, { true, 5999.0 / testSamplesPerBeat, testBpm }, settings);       // 3 samples back: 6000 is in this block too
+        int again = 0;
+        for (const auto m : midi) if (m.getMessage().isNoteOn()) ++again;
+        check (again == 0, "a 3-sample backward drift does not retrigger the step that just fired");
     }
 
     std::printf ("Triggers disabled\n");
