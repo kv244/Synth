@@ -98,7 +98,8 @@ public:
 
     float getNextSample() noexcept
     {
-        sustainLevel += juce::jlimit (-maxSustainStep, maxSustainStep, parameters.sustain - sustainLevel);
+        if (sustainLevel != parameters.sustain)   // only while Sustain is moving
+            sustainLevel += juce::jlimit (-maxSustainStep, maxSustainStep, parameters.sustain - sustainLevel);
 
         switch (state)
         {

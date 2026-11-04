@@ -236,6 +236,15 @@ namespace
     const juce::Identifier noteId     { "note" };
     const juce::Identifier velocityId { "velocity" };
 
+    /**
+        Saved-state format version, written as an attribute of the state tree.
+          (none) v1.0 - v1.3: parameters, the editor's view and, from v1.3, the pattern
+          2      v1.4+: same content; the attribute exists so later format changes
+                 can tell old sessions apart and migrate them
+    */
+    const juce::Identifier stateVersionId { "stateVersion" };
+    constexpr int currentStateVersion = 2;
+
     /** Notes are transposed relative to this key in Transpose mode (C4). */
     constexpr int transposeReferenceNote = 60;
 }
@@ -380,6 +389,7 @@ void BasicSynthAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
     // Parameters and GUI state come from the APVTS; the pattern is added as a
     // child tree because its 16 steps are not host parameters.
     auto state = apvts.copyState();
+    state.setProperty (stateVersionId, currentStateVersion, nullptr);
 
     if (auto previous = state.getChildWithName (patternId); previous.isValid())
         state.removeChild (previous, nullptr);
@@ -409,7 +419,11 @@ void BasicSynthAudioProcessor::setStateInformation (const void* data, int sizeIn
     const auto tree = juce::ValueTree::fromXml (*xml);
     apvts.replaceState (tree);
 
-    // Sessions saved before the sequencer existed have no pattern: keep the default.
+    // A state without a pattern (sessions saved before v1.3, or a preset that
+    // only carries parameters) gets the default pattern, so loading it always
+    // sounds the same whatever was loaded before.
+    loadDefaultPattern();
+
     const auto pattern = tree.getChildWithName (patternId);
     for (int i = 0; i < juce::jmin (StepSequencer::numSteps, pattern.getNumChildren()); ++i)
     {

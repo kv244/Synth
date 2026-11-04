@@ -16,6 +16,8 @@ Save a rendered example to WAV:
 """
 
 import os
+import re
+import struct
 import sys
 import argparse
 import numpy as np
@@ -415,6 +417,91 @@ def test_sustain_change_while_held(plugin):
     return f"largest step={step:.4f}  peak after the change={later:.3f}"
 
 
+JUCE_XML_MAGIC = 0x21324356   # header of juce::AudioProcessor::copyXmlToBinary ("VC2!")
+JUCE_BASE64 = ".ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+"
+
+
+def juce_xml_from_binary(data: bytes) -> tuple[str, bytes]:
+    """Split a copyXmlToBinary block into (xml text, bytes that follow it)."""
+    magic, length = struct.unpack("<II", data[:8])
+    assert magic == JUCE_XML_MAGIC, "not a JUCE binary XML block"
+    return data[8:8 + length].rstrip(b"\0").decode("utf-8"), data[8 + length:]
+
+
+def juce_xml_to_binary(xml: str) -> bytes:
+    text = xml.encode("utf-8") + b"\0"
+    return struct.pack("<II", JUCE_XML_MAGIC, len(text)) + text
+
+
+def juce_base64_decode(text: str) -> bytes:
+    """juce::MemoryBlock::fromBase64Encoding: "<size>.<chars>", 6 bits per char, least significant first."""
+    size, chars = text.split(".", 1)
+    n = sum(JUCE_BASE64.index(c) << (6 * i) for i, c in enumerate(chars))
+    return n.to_bytes(int(size), "little")
+
+
+def juce_base64_encode(data: bytes) -> str:
+    n = int.from_bytes(data, "little")
+    return f"{len(data)}." + "".join(JUCE_BASE64[(n >> (6 * i)) & 63] for i in range((len(data) * 8 + 5) // 6))
+
+
+def state_xml(plugin) -> str:
+    """The plugin's own saved state (what getStateInformation wrote), as XML text.
+
+    pedalboard wraps a VST3's state as <VST3PluginState><IComponent>base64</IComponent>...,
+    and JUCE's VST3 wrapper appends its private data after the plugin's block."""
+    outer, _ = juce_xml_from_binary(plugin.raw_state)
+    component = re.search(r"<IComponent>([^<]*)</IComponent>", outer).group(1)
+    inner, _ = juce_xml_from_binary(juce_base64_decode(component))
+    return inner
+
+
+def load_state_xml(plugin, xml: str):
+    """Replace the plugin's own state with `xml`, keeping pedalboard's and JUCE's wrapping."""
+    outer, _ = juce_xml_from_binary(plugin.raw_state)
+    component = re.search(r"<IComponent>([^<]*)</IComponent>", outer).group(1)
+    _, private = juce_xml_from_binary(juce_base64_decode(component))
+    encoded = juce_base64_encode(juce_xml_to_binary(xml) + private)
+    plugin.raw_state = juce_xml_to_binary(outer.replace(component, encoded))
+
+
+def sequencer_onsets(plugin) -> int:
+    """Number of notes the sequencer plays in 4 s at 1/8, 120 BPM: the 16-step pattern once."""
+    set_params(plugin, filter_on=False)
+    fast = {find_param(plugin, "attack"): 0.0, find_param(plugin, "release"): 0.0,
+            find_param(plugin, "sequencer", "rate"): 0.0}
+    with SequencerOn(plugin, **fast):
+        audio = plugin.process([], 4.0, SAMPLE_RATE, reset=True)
+    return len(onset_times(audio))
+
+
+def test_state_round_trip(plugin):
+    """The pattern is saved in the state and restored; a state without one loads the default."""
+    xml = state_xml(plugin)
+    assert 'stateVersion="2"' in xml, "state has no stateVersion attribute"
+    assert "<Pattern>" in xml, "state has no pattern"
+
+    # Only step 0 on: one note per pass through the pattern
+    def step(i):
+        return f'<Step on="{1 if i == 0 else 0}" note="60" velocity="100"/>'
+    single = xml[:xml.index("<Pattern>")] + "<Pattern>" + "".join(step(i) for i in range(16)) + \
+        xml[xml.index("</Pattern>"):]
+    load_state_xml(plugin, single)
+    one_step = sequencer_onsets(plugin)
+
+    # Same state with the pattern removed: back to the default pattern (12 steps on)
+    without = xml[:xml.index("<Pattern>")] + xml[xml.index("</Pattern>") + len("</Pattern>"):]
+    load_state_xml(plugin, single)
+    load_state_xml(plugin, without)
+    default = sequencer_onsets(plugin)
+    load_state_xml(plugin, xml)
+
+    assert one_step == 1, f"Edited pattern did not load: {one_step} notes, expected 1"
+    assert default == len(DEFAULT_PATTERN_ON_STEPS), \
+        f"State without a pattern kept the previous one: {default} notes, expected {len(DEFAULT_PATTERN_ON_STEPS)}"
+    return f"one-step pattern: {one_step} note  no pattern: {default} notes (default)"
+
+
 def test_close_events_sample_accurate(plugin):
     """Two notes 20 samples apart in the same block each start on their own sample.
 
@@ -476,6 +563,7 @@ TESTS = [
     ("Headroom",          test_headroom),
     ("Release mid-decay", test_release_mid_decay),
     ("Sustain change",    test_sustain_change_while_held),
+    ("State round trip",  test_state_round_trip),
 ]
 
 
