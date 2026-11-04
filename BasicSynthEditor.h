@@ -125,11 +125,17 @@ public:
         setUpReadout (widthReadout, neon::cyan, juce::Justification::centredRight);
 
         // ── Step sequencer ───────────────────────────────────────────────────
+        // RUN and SYNC are latching buttons (lit = on) rather than tick boxes,
+        // so they read as transport controls. ButtonAttachment works with any
+        // juce::Button whose clicks toggle its state.
         for (auto* toggle : { &seqOnButton, &seqSyncButton })
         {
-            toggle->setColour (juce::ToggleButton::textColourId,         neon::amber);
-            toggle->setColour (juce::ToggleButton::tickColourId,         neon::amber);
-            toggle->setColour (juce::ToggleButton::tickDisabledColourId, neon::amber.withAlpha (0.3f));
+            toggle->setClickingTogglesState (true);
+            toggle->setColour (juce::TextButton::buttonColourId,   juce::Colours::transparentBlack);
+            toggle->setColour (juce::TextButton::buttonOnColourId, neon::amber.withAlpha (0.30f));
+            toggle->setColour (juce::TextButton::textColourOffId,  neon::amber.withAlpha (0.55f));
+            toggle->setColour (juce::TextButton::textColourOnId,   neon::amber);
+            toggle->setColour (juce::ComboBox::outlineColourId,    neon::amber.withAlpha (0.6f));
             addAndMakeVisible (toggle);
         }
         seqOnButton.setTooltip ("Run the step sequencer");
@@ -440,7 +446,7 @@ private:
 
     // Step sequencer
     StepGrid           stepGrid;
-    juce::ToggleButton seqOnButton { "RUN" }, seqSyncButton { "SYNC" };
+    juce::TextButton seqOnButton { "RUN" }, seqSyncButton { "SYNC" };
     juce::Slider       seqTempoSlider, seqSwingSlider, seqGateSlider;
     juce::ComboBox     seqRateCombo, seqModeCombo;
     juce::Label        seqTempoReadout, seqSwingReadout, seqGateReadout;
