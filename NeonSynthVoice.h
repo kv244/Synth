@@ -2,7 +2,7 @@
 #include <JuceHeader.h>
 #include "VoiceEnvelope.h"
 
-class BasicSynthSound : public juce::SynthesiserSound
+class NeonSynthSound : public juce::SynthesiserSound
 {
 public:
     bool appliesToNote    (int) override { return true; }
@@ -21,7 +21,7 @@ public:
     output buffer (no scratch buffer to overrun), and every parameter that can
     click is smoothed or latched at a phase wrap.
 */
-class BasicSynthVoice : public juce::SynthesiserVoice
+class NeonSynthVoice : public juce::SynthesiserVoice
 {
 public:
     /** Parameter snapshot, read once per block on the audio thread. */
@@ -61,7 +61,7 @@ public:
 
     bool canPlaySound (juce::SynthesiserSound* s) override
     {
-        return dynamic_cast<BasicSynthSound*> (s) != nullptr;
+        return dynamic_cast<NeonSynthSound*> (s) != nullptr;
     }
 
     void prepare (double newSampleRate, int maxBlockSize)

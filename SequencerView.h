@@ -1,6 +1,6 @@
 #pragma once
 #include <JuceHeader.h>
-#include "BasicSynthProcessor.h"
+#include "NeonSynthProcessor.h"
 #include "Visualisers.h"
 
 /**
@@ -28,7 +28,7 @@ class StepGrid : public juce::Component,
                  public juce::SettableTooltipClient
 {
 public:
-    explicit StepGrid (BasicSynthAudioProcessor& p) : processor (p)
+    explicit StepGrid (NeonSynthProcessor& p) : processor (p)
     {
         setTooltip ("Click: step on/off.  Drag up/down: note.  Shift- or right-drag: velocity.  Wheel: note (shift: velocity).");
         refresh();
@@ -171,7 +171,7 @@ private:
         repaint();
     }
 
-    BasicSynthAudioProcessor& processor;
+    NeonSynthProcessor& processor;
     std::array<StepSequencer::Step, StepSequencer::numSteps> steps {};
     int   playhead = -1;
 

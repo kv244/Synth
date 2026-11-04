@@ -1,6 +1,6 @@
 #pragma once
 #include <JuceHeader.h>
-#include "BasicSynthProcessor.h"
+#include "NeonSynthProcessor.h"
 
 /*
     GUI-side visualisers for Neon Synth.
@@ -505,7 +505,7 @@ private:
 class AdsrView : public juce::Component
 {
 public:
-    using VoiceViews = std::array<BasicSynthAudioProcessor::VoiceView, BasicSynthAudioProcessor::numVoices>;
+    using VoiceViews = std::array<NeonSynthProcessor::VoiceView, NeonSynthProcessor::numVoices>;
 
     void update (float attack, float decay, float sustain, float release, const VoiceViews& voices)
     {
@@ -587,7 +587,7 @@ private:
     float releaseStart() const noexcept { return 1.0f - releaseW; }
 
     float attackW = 0.2f, decayW = 0.2f, releaseW = 0.38f, sustainLevel = 0.7f;
-    std::array<Marker, BasicSynthAudioProcessor::numVoices> markers {};
+    std::array<Marker, NeonSynthProcessor::numVoices> markers {};
     int numMarkers = 0;
 };
 
@@ -637,5 +637,5 @@ public:
     }
 
 private:
-    std::array<float, BasicSynthAudioProcessor::numVoices> glow {};
+    std::array<float, NeonSynthProcessor::numVoices> glow {};
 };

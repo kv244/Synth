@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-BasicSynth automated tests using pedalboard + mido.
+NeonSynth automated tests using pedalboard + mido.
 Loads the VST3 directly — no MIDI ports, loopMIDI, or DAW required.
 
   pip install pedalboard mido numpy sounddevice soundfile
@@ -63,8 +63,8 @@ BLOCK_SIZE  = 512
 # pedalboard requires the inner DLL, not the outer bundle folder
 VST3_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
-    "build", "BasicSynth_artefacts", "Release",
-    "VST3", "BasicSynth.vst3", "Contents", "x86_64-win", "BasicSynth.vst3",
+    "build", "NeonSynth_artefacts", "Release",
+    "VST3", "NeonSynth.vst3", "Contents", "x86_64-win", "NeonSynth.vst3",
 )
 
 # ---------------------------------------------------------------------------
@@ -590,7 +590,7 @@ def demo_render(plugin) -> np.ndarray:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="BasicSynth test suite")
+    parser = argparse.ArgumentParser(description="NeonSynth test suite")
     parser.add_argument("--play", action="store_true",
                         help="render a demo and play it through speakers")
     parser.add_argument("--save", metavar="FILE",
@@ -607,7 +607,7 @@ def main():
 
     if args.midilog:
         # The plugin reads this when it is constructed, so set it before loading.
-        os.environ["BASICSYNTH_MIDILOG"] = os.path.abspath(args.midilog)
+        os.environ["NEONSYNTH_MIDILOG"] = os.path.abspath(args.midilog)
 
     if not os.path.exists(VST3_PATH):
         sys.exit(

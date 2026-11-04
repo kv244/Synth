@@ -1,14 +1,14 @@
 #pragma once
 #include <JuceHeader.h>
-#include "BasicSynth.h"
+#include "NeonSynthVoice.h"
 #include "MidiLogger.h"
 #include "StepSequencer.h"
 
-class BasicSynthAudioProcessor : public juce::AudioProcessor
+class NeonSynthProcessor : public juce::AudioProcessor
 {
 public:
-    BasicSynthAudioProcessor();
-    ~BasicSynthAudioProcessor() override = default;
+    NeonSynthProcessor();
+    ~NeonSynthProcessor() override = default;
 
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     using AudioProcessor::processBlock;   // keep the double-precision overload visible
@@ -20,7 +20,7 @@ public:
     juce::AudioProcessorEditor* createEditor() override;
     bool hasEditor() const override { return true; }
 
-    const juce::String getName() const override { return "BasicSynth"; }
+    const juce::String getName() const override { return "NeonSynth"; }
     bool acceptsMidi() const override { return true; }
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
@@ -129,7 +129,7 @@ private:
     juce::int64 samplesProcessed = 0;
 
     juce::Synthesiser synth;
-    std::vector<BasicSynthVoice*> voices;    // owned by synth; cached to avoid dynamic_cast per block
+    std::vector<NeonSynthVoice*> voices;    // owned by synth; cached to avoid dynamic_cast per block
     std::array<VoiceView, numVoices> voiceViews;
 
     void publishVoiceViews() noexcept;
@@ -179,5 +179,5 @@ private:
 
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BasicSynthAudioProcessor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (NeonSynthProcessor)
 };

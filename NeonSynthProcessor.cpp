@@ -1,12 +1,17 @@
-#include "BasicSynthProcessor.h"
-#include "BasicSynthEditor.h"
+#include "NeonSynthProcessor.h"
+#include "NeonSynthEditor.h"
 
 namespace
 {
-    /** Log path from BASICSYNTH_MIDILOG, or (Standalone only) from "--midilog <file>". */
+    /**
+        Log path from NEONSYNTH_MIDILOG, or (Standalone only) from "--midilog <file>".
+        BASICSYNTH_MIDILOG, the name before v1.4, still works.
+    */
     juce::String findMidiLogPath (juce::AudioProcessor::WrapperType wrapper)
     {
-        auto path = juce::SystemStats::getEnvironmentVariable ("BASICSYNTH_MIDILOG", {});
+        auto path = juce::SystemStats::getEnvironmentVariable ("NEONSYNTH_MIDILOG", {});
+        if (path.isEmpty())
+            path = juce::SystemStats::getEnvironmentVariable ("BASICSYNTH_MIDILOG", {});
 
         if (path.isEmpty() && wrapper == juce::AudioProcessor::wrapperType_Standalone)
         {
@@ -29,7 +34,7 @@ namespace
     }
 }
 
-juce::AudioProcessorValueTreeState::ParameterLayout BasicSynthAudioProcessor::createParameterLayout()
+juce::AudioProcessorValueTreeState::ParameterLayout NeonSynthProcessor::createParameterLayout()
 {
     using namespace juce;
 
@@ -74,14 +79,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout BasicSynthAudioProcessor::cr
     return layout;
 }
 
-BasicSynthAudioProcessor::BasicSynthAudioProcessor()
+NeonSynthProcessor::NeonSynthProcessor()
     : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       apvts (*this, nullptr, "Parameters", createParameterLayout())
 {
     for (int i = 0; i < numVoices; ++i)
-        voices.push_back (static_cast<BasicSynthVoice*> (synth.addVoice (new BasicSynthVoice())));
+        voices.push_back (static_cast<NeonSynthVoice*> (synth.addVoice (new NeonSynthVoice())));
 
-    synth.addSound (new BasicSynthSound());
+    synth.addSound (new NeonSynthSound());
 
     // By default juce::Synthesiser handles any MIDI event that falls within 32
     // samples of its last render point immediately, so a note could start up to
@@ -113,7 +118,7 @@ BasicSynthAudioProcessor::BasicSynthAudioProcessor()
         midiLogger.start (juce::File::getCurrentWorkingDirectory().getChildFile (path));
 }
 
-void BasicSynthAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
+void NeonSynthProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     synth.setCurrentPlaybackSampleRate (sampleRate);
 
@@ -131,7 +136,7 @@ void BasicSynthAudioProcessor::prepareToPlay (double sampleRate, int samplesPerB
     numHeldKeys    = 0;
 }
 
-void BasicSynthAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
+void NeonSynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
 {
     juce::ScopedNoDenormals noDenormals;
     const int numSamples = buffer.getNumSamples();
@@ -141,7 +146,7 @@ void BasicSynthAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, j
     buffer.clear();
     midiLogger.push (midiMessages, samplesProcessed);   // lock-free; formatting/I/O happen elsewhere
 
-    BasicSynthVoice::Params params;
+    NeonSynthVoice::Params params;
     params.waveform = waveformParameter->getIndex();
     params.cutoffHz = cutoffParameter->get();
     params.filterOn = filterEnabledParameter->get();
@@ -181,7 +186,7 @@ void BasicSynthAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, j
     samplesProcessed += numSamples;
 }
 
-void BasicSynthAudioProcessor::pushScope (const float* left, const float* right, int numFrames) noexcept
+void NeonSynthProcessor::pushScope (const float* left, const float* right, int numFrames) noexcept
 {
     int i = 0;
     scopeFifo.write (numFrames).forEach ([&] (int index)
@@ -192,7 +197,7 @@ void BasicSynthAudioProcessor::pushScope (const float* left, const float* right,
     });
 }
 
-void BasicSynthAudioProcessor::publishVoiceViews() noexcept
+void NeonSynthProcessor::publishVoiceViews() noexcept
 {
     for (size_t i = 0; i < voices.size() && i < voiceViews.size(); ++i)
     {
@@ -206,7 +211,7 @@ void BasicSynthAudioProcessor::publishVoiceViews() noexcept
     }
 }
 
-int BasicSynthAudioProcessor::drainScope (float* destLeft, float* destRight, int maxFrames) noexcept
+int NeonSynthProcessor::drainScope (float* destLeft, float* destRight, int maxFrames) noexcept
 {
     int i = 0;
     scopeFifo.read (juce::jmin (maxFrames, scopeFifo.getNumReady())).forEach ([&] (int index)
@@ -218,7 +223,7 @@ int BasicSynthAudioProcessor::drainScope (float* destLeft, float* destRight, int
     return i;
 }
 
-bool BasicSynthAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
+bool NeonSynthProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
     const auto& out = layouts.getMainOutputChannelSet();
     return out == juce::AudioChannelSet::stereo() || out == juce::AudioChannelSet::mono();
@@ -249,7 +254,7 @@ namespace
     constexpr int transposeReferenceNote = 60;
 }
 
-void BasicSynthAudioProcessor::loadDefaultPattern() noexcept
+void NeonSynthProcessor::loadDefaultPattern() noexcept
 {
     // A C-minor bassline around C3 with octave jumps; notes are kept on the
     // "off" steps too, so switching a step on gives a sensible pitch.
@@ -265,13 +270,13 @@ void BasicSynthAudioProcessor::loadDefaultPattern() noexcept
         sequencer.setStep (i, pattern[i]);
 }
 
-void BasicSynthAudioProcessor::setSequencerStep (int index, const StepSequencer::Step& step)
+void NeonSynthProcessor::setSequencerStep (int index, const StepSequencer::Step& step)
 {
     sequencer.setStep (index, step);
     updateHostDisplay (ChangeDetails().withNonParameterStateChanged (true));
 }
 
-void BasicSynthAudioProcessor::trackHeldKey (int note, bool isDown) noexcept
+void NeonSynthProcessor::trackHeldKey (int note, bool isDown) noexcept
 {
     // Remove the key if present, then (for a key-down) append it as the most recent.
     for (int i = 0; i < numHeldKeys; ++i)
@@ -289,7 +294,7 @@ void BasicSynthAudioProcessor::trackHeldKey (int note, bool isDown) noexcept
         heldKeys[(size_t) numHeldKeys++] = note;
 }
 
-void BasicSynthAudioProcessor::buildPlayMidi (const juce::MidiBuffer& input, int numSamples) noexcept
+void NeonSynthProcessor::buildPlayMidi (const juce::MidiBuffer& input, int numSamples) noexcept
 {
     playMidi.clear();
 
@@ -384,7 +389,7 @@ void BasicSynthAudioProcessor::buildPlayMidi (const juce::MidiBuffer& input, int
 //==============================================================================
 // State
 
-void BasicSynthAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
+void NeonSynthProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     // Parameters and GUI state come from the APVTS; the pattern is added as a
     // child tree because its 16 steps are not host parameters.
@@ -410,7 +415,7 @@ void BasicSynthAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
         copyXmlToBinary (*xml, destData);
 }
 
-void BasicSynthAudioProcessor::setStateInformation (const void* data, int sizeInBytes)
+void NeonSynthProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
     auto xml = getXmlFromBinary (data, sizeInBytes);
     if (xml == nullptr || ! xml->hasTagName (apvts.state.getType()))
@@ -436,5 +441,5 @@ void BasicSynthAudioProcessor::setStateInformation (const void* data, int sizeIn
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 {
-    return new BasicSynthAudioProcessor();
+    return new NeonSynthProcessor();
 }

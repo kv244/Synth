@@ -1,5 +1,5 @@
 /*
-    Render benchmark: times BasicSynthAudioProcessor::processBlock directly,
+    Render benchmark: times NeonSynthProcessor::processBlock directly,
     with no host or Python in the way, so the numbers are the plugin's own cost.
 
     Scenarios (48 kHz, 512-sample blocks, 60 s of audio each):
@@ -8,12 +8,12 @@
       16 voices - 16 notes held at full velocity (soft clipper working hard)
       dense     - sequencer at 1/32 and 240 BPM plus an 8-note chord every 250 ms
 
-    Build with CMake:  cmake -B build -DJUCE_DIR=... -DBASICSYNTH_BUILD_TESTS=ON
+    Build with CMake:  cmake -B build -DJUCE_DIR=... -DNEONSYNTH_BUILD_TESTS=ON
                        cmake --build build --config Release --target RenderBenchmark
     Prints, per scenario, the render time and the share of one CPU core used
     in real time.
 */
-#include "BasicSynthProcessor.h"
+#include "NeonSynthProcessor.h"
 #include <chrono>
 #include <cstdio>
 #include <functional>
@@ -35,7 +35,7 @@ namespace
     double render (const std::function<void (juce::MidiBuffer&, juce::int64 blockStart)>& addMidi,
                    const std::function<void (juce::AudioProcessor&)>& configure)
     {
-        BasicSynthAudioProcessor processor;
+        NeonSynthProcessor processor;
         configure (processor);
         processor.setRateAndBufferSizeDetails (benchSampleRate, benchBlockSize);
         processor.prepareToPlay (benchSampleRate, benchBlockSize);

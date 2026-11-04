@@ -13,7 +13,7 @@
 class MidiLogger : private juce::Thread
 {
 public:
-    MidiLogger() : juce::Thread ("BasicSynth MIDI log") {}
+    MidiLogger() : juce::Thread ("NeonSynth MIDI log") {}
     ~MidiLogger() override { stop(); }
 
     /** Message thread. Truncates the file and starts the writer thread. */

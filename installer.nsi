@@ -1,11 +1,11 @@
 ; Neon Synth — NSIS installer script
-; Build:  makensis /DPRODUCT_VERSION=1.3.0 installer.nsi
+; Build:  makensis /DPRODUCT_VERSION=1.4.0 installer.nsi
 
 Unicode True
 
 ; ── Version (override from CI with /DPRODUCT_VERSION=x.y.z) ──────────────────
 !ifndef PRODUCT_VERSION
-  !define PRODUCT_VERSION "1.3.0"
+  !define PRODUCT_VERSION "1.4.0"
 !endif
 
 ; ── Constants ────────────────────────────────────────────────────────────────
@@ -50,17 +50,22 @@ Section "VST3 Plugin" SEC_VST3
   ; Required — cannot be deselected
   SectionIn RO
 
+  ; Before v1.4 the plugin was called BasicSynth. Remove the old bundle so the
+  ; DAW doesn't find two copies of the same plugin (they share a plugin ID).
+  RMDir /r "$COMMONFILES64\VST3\BasicSynth.vst3"
+
   SetOutPath "$COMMONFILES64\VST3"
-  File /r "build\BasicSynth_artefacts\Release\VST3\BasicSynth.vst3"
+  File /r "build\NeonSynth_artefacts\Release\VST3\NeonSynth.vst3"
 SectionEnd
 
 Section "Standalone Application" SEC_STANDALONE
+  Delete "$INSTDIR\BasicSynth.exe"   ; the Standalone's name before v1.4
   SetOutPath "$INSTDIR"
-  File "build\BasicSynth_artefacts\Release\Standalone\BasicSynth.exe"
+  File "build\NeonSynth_artefacts\Release\Standalone\NeonSynth.exe"
 
   CreateDirectory "$SMPROGRAMS\${PRODUCT_PUBLISHER}"
   CreateShortcut  "$SMPROGRAMS\${PRODUCT_PUBLISHER}\${PRODUCT_NAME}.lnk" \
-                  "$INSTDIR\BasicSynth.exe"
+                  "$INSTDIR\NeonSynth.exe"
 SectionEnd
 
 ; ── Descriptions (shown in component page) ───────────────────────────────────
@@ -84,9 +89,9 @@ SectionEnd
 
 ; ── Uninstaller ──────────────────────────────────────────────────────────────
 Section "Uninstall"
-  RMDir /r "$COMMONFILES64\VST3\BasicSynth.vst3"
+  RMDir /r "$COMMONFILES64\VST3\NeonSynth.vst3"
 
-  Delete    "$INSTDIR\BasicSynth.exe"
+  Delete    "$INSTDIR\NeonSynth.exe"
   Delete    "$INSTDIR\uninstall.exe"
   RMDir     "$INSTDIR"
   RMDir     "$PROGRAMFILES64\${PRODUCT_PUBLISHER}"

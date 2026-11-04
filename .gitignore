@@ -2,3 +2,4 @@ build/
 *.user
 .vs/
 NeonSynth-*-Windows-Setup.exe
+__pycache__/

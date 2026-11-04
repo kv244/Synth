@@ -1,6 +1,6 @@
 #pragma once
 #include <JuceHeader.h>
-#include "BasicSynthProcessor.h"
+#include "NeonSynthProcessor.h"
 #include "Visualisers.h"
 #include "SequencerView.h"
 #include "HelpOverlay.h"
@@ -23,11 +23,11 @@
     A 30 Hz timer drains the processor's lock-free scope FIFO and reads the
     per-voice atomics; it is the only path from audio to GUI.
 */
-class BasicSynthEditor : public juce::AudioProcessorEditor,
+class NeonSynthEditor : public juce::AudioProcessorEditor,
                          private juce::Timer
 {
 public:
-    explicit BasicSynthEditor (BasicSynthAudioProcessor& p)
+    explicit NeonSynthEditor (NeonSynthProcessor& p)
         : AudioProcessorEditor (&p), processor (p), apvts (p.getAPVTS()), stepGrid (p)
     {
         backgroundImage = juce::ImageCache::getFromMemory (BinaryData::gui_background_png,
@@ -427,7 +427,7 @@ private:
         updateReadouts();
     }
 
-    BasicSynthAudioProcessor&           processor;
+    NeonSynthProcessor&           processor;
     juce::AudioProcessorValueTreeState& apvts;
     juce::Image backgroundImage, scaledBackground;
 
@@ -450,7 +450,7 @@ private:
     LevelMeter       meter;
     AdsrView         adsrView;
     VoiceLeds        voiceLeds;
-    std::array<float, BasicSynthAudioProcessor::scopeFifoSize> scratchLeft {}, scratchRight {}, scratchMid {};
+    std::array<float, NeonSynthProcessor::scopeFifoSize> scratchLeft {}, scratchRight {}, scratchMid {};
 
     juce::TextButton scopeButton { "SCOPE" }, spectrumButton { "SPECTRUM" };
     juce::TooltipWindow tooltipWindow { this };
@@ -484,10 +484,10 @@ private:
 
     std::unique_ptr<juce::ParameterAttachment> filterEnabledListener;   // last: destroyed first
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BasicSynthEditor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (NeonSynthEditor)
 };
 
-inline juce::AudioProcessorEditor* BasicSynthAudioProcessor::createEditor()
+inline juce::AudioProcessorEditor* NeonSynthProcessor::createEditor()
 {
-    return new BasicSynthEditor (*this);
+    return new NeonSynthEditor (*this);
 }

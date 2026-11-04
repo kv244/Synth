@@ -6,7 +6,7 @@
     things it does differently: a slewed sustain level, and a release that
     survives parameter updates.
 
-    Build with CMake:  cmake -B build -DJUCE_DIR=... -DBASICSYNTH_BUILD_TESTS=ON
+    Build with CMake:  cmake -B build -DJUCE_DIR=... -DNEONSYNTH_BUILD_TESTS=ON
                        cmake --build build --target VoiceEnvelopeTests
     Run the resulting VoiceEnvelopeTests executable; it exits non-zero on failure.
 */

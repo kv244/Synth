@@ -3,7 +3,7 @@
     transport stop / jump, tolerance of small transport drift, block-size
     independence, triggers disabled, retriggering and step packing).
 
-    Build with CMake:  cmake -B build -DJUCE_DIR=... -DBASICSYNTH_BUILD_TESTS=ON
+    Build with CMake:  cmake -B build -DJUCE_DIR=... -DNEONSYNTH_BUILD_TESTS=ON
                        cmake --build build --target StepSequencerTests
     Run the resulting StepSequencerTests executable; it exits non-zero on failure.
 */
