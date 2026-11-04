@@ -1,5 +1,6 @@
 #pragma once
 #include <JuceHeader.h>
+#include "VoiceEnvelope.h"
 
 class BasicSynthSound : public juce::SynthesiserSound
 {
@@ -9,7 +10,7 @@ public:
 };
 
 /**
-    One synth voice: band-limited oscillator -> ADSR -> TPT low-pass -> pan.
+    One synth voice: band-limited oscillator -> ADSR (VoiceEnvelope) -> TPT low-pass -> pan.
 
     Stereo: each voice is panned by its pitch (C4 in the centre, two octaves
     either side reaching the edges), scaled by the Width parameter. The pan law
@@ -73,6 +74,9 @@ public:
         filter.setType (juce::dsp::StateVariableTPTFilterType::lowpass);
         filter.setResonance (1.0f / juce::MathConstants<float>::sqrt2);   // Butterworth Q
 
+        level.reset (newSampleRate, 0.002);       // 2 ms: a retriggered or stolen voice changes velocity without a click
+        level.setCurrentAndTargetValue (level.getTargetValue());
+
         cutoff.reset (newSampleRate, 0.02);       // 20 ms, multiplicative (even in octaves)
         cutoff.setCurrentAndTargetValue (clampCutoff (cutoff.getTargetValue()));
         filter.setCutoffFrequency (cutoff.getCurrentValue());
@@ -106,17 +110,28 @@ public:
         phaseInc        = (float) (frequencyHz / sampleRate);
         samplesSinceOn  = 0;
         samplesSinceOff = -1;
-        level    = velocity * voiceGain;
 
-        // Pan by pitch. A voice that was silent jumps straight to its new
-        // position; a sounding voice (retrigger or steal) glides there.
+        // A sounding voice (retrigger or steal) glides to its new velocity and
+        // pan. A silent voice starts exactly at the current settings: its
+        // smoothers stopped advancing when it went quiet, so without the snap a
+        // cutoff or filter-toggle change made while it was idle would sweep
+        // audibly over the first 10-20 ms of the note.
         notePan = juce::jlimit (-1.0f, 1.0f, (float) (midiNote - 60) / 24.0f);
+        const float newLevel = velocity * voiceGain;
+
         if (adsr.isActive())
+        {
+            level.setTargetValue (newLevel);
             pan.setTargetValue (notePan * width);
+        }
         else
         {
+            level.setCurrentAndTargetValue (newLevel);
             pan.setCurrentAndTargetValue (notePan * width);
             updatePanGains (pan.getCurrentValue());
+            cutoff.setCurrentAndTargetValue (cutoff.getTargetValue());
+            filter.setCutoffFrequency (cutoff.getCurrentValue());
+            filterMix.setCurrentAndTargetValue (filterMix.getTargetValue());
         }
 
         if (hardStopping)
@@ -125,7 +140,7 @@ public:
             adsr.setParameters (adsrParams);
         }
 
-        // juce::ADSR attacks from the current level, and the phase and filter state
+        // The envelope attacks from its current level, and the phase and filter state
         // are kept, so retriggering or stealing a sounding voice doesn't click.
         adsr.noteOn();
     }
@@ -168,7 +183,7 @@ public:
                 filter.setCutoffFrequency (cutoff.getNextValue());
 
             lastEnvelope    = adsr.getNextSample();
-            const float dry = nextOscillatorSample() * level * lastEnvelope;
+            const float dry = nextOscillatorSample() * level.getNextValue() * lastEnvelope;
             const float wet = filter.processSample (0, dry);   // always run: state stays warm
             const float out = dry + filterMix.getNextValue() * (wet - dry);
 
@@ -264,7 +279,7 @@ private:
     }
 
     double sampleRate = 44100.0;
-    float  phase = 0.0f, phaseInc = 0.0f, level = 0.0f;
+    float  phase = 0.0f, phaseInc = 0.0f;
     int    waveform = 0, pendingWaveform = 0;
     bool   hardStopping = false;
 
@@ -272,8 +287,9 @@ private:
     float       frequencyHz = 0.0f, lastEnvelope = 0.0f;
     juce::int64 samplesSinceOn = 0, samplesSinceOff = -1;
 
-    juce::ADSR adsr;
-    juce::ADSR::Parameters adsrParams;
+    VoiceEnvelope adsr;
+    VoiceEnvelope::Parameters adsrParams;
+    juce::SmoothedValue<float> level { 0.0f };   // velocity * voiceGain
     juce::dsp::StateVariableTPTFilter<float> filter;
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Multiplicative> cutoff { 2000.0f };
     juce::SmoothedValue<float> filterMix { 1.0f };

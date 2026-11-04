@@ -347,6 +347,74 @@ def test_headroom(plugin):
     return f"16 voices +6 dB: {20 * np.log10(peak_loud):+.2f} dBFS  single note: {20 * np.log10(peak_single):+.2f} dBFS"
 
 
+def time_to_raw(seconds: float, maximum: float) -> float:
+    """Normalised value of an envelope time parameter (0.001 s .. maximum, skew 0.3)."""
+    return float(((seconds - 0.001) / (maximum - 0.001)) ** 0.3)
+
+
+def max_step(audio: np.ndarray) -> float:
+    """Largest sample-to-sample change on either channel: a click shows up as a big step."""
+    return float(np.abs(np.diff(audio, axis=1)).max())
+
+
+# A full-velocity sine at C4 changes by at most 2*pi*f/fs*A ~ 0.0093 per sample on its own.
+CLICK_THRESHOLD = 0.02
+
+
+class Params:
+    """Context manager: set raw parameter values, restore them afterwards."""
+
+    def __init__(self, plugin, **raw_values):
+        self.plugin, self.raw_values = plugin, raw_values
+
+    def __enter__(self):
+        self.saved = {name: self.plugin.parameters[name].raw_value for name in self.raw_values}
+        for name, value in self.raw_values.items():
+            self.plugin.parameters[name].raw_value = value
+        return self.plugin
+
+    def __exit__(self, *exc):
+        for name, value in self.saved.items():
+            self.plugin.parameters[name].raw_value = value
+        return False
+
+
+def test_release_mid_decay(plugin):
+    """Sustain 0, note released halfway through a 1 s decay: it fades over the release time.
+
+    juce::ADSR (used before v1.4.0) recomputed its release rate from the sustain
+    level on every block, so with Sustain 0 the note stopped dead - a click."""
+    set_params(plugin)
+    with Params(plugin, **{find_param(plugin, "sustain"): 0.0,
+                           find_param(plugin, "decay"): time_to_raw(1.0, 5.0)}):
+        msgs = [mido.Message("note_on", note=60, velocity=127, time=0.0),
+                mido.Message("note_off", note=60, velocity=0, time=0.5)]
+        audio = plugin.process(msgs, 1.2, SAMPLE_RATE, reset=True)
+    off = int(0.5 * SAMPLE_RATE)
+    tail = rms(audio[:, off + int(0.05 * SAMPLE_RATE): off + int(0.15 * SAMPLE_RATE)])   # 50-150 ms after
+    step = max_step(audio)
+    assert tail > 1e-3, f"Note stopped dead at its note-off — tail RMS {tail:.6f}"
+    assert step < CLICK_THRESHOLD, f"Click: a {step:.4f} step between samples"
+    return f"tail RMS={tail:.4f}  largest step={step:.4f}"
+
+
+def test_sustain_change_while_held(plugin):
+    """Turning Sustain from 100% to 20% while a note is held ramps the level instead of jumping."""
+    set_params(plugin)
+    sustain = find_param(plugin, "sustain")
+    with Params(plugin, **{sustain: 1.0}):
+        first = plugin.process([mido.Message("note_on", note=60, velocity=127, time=0.0)],
+                               0.5, SAMPLE_RATE, reset=True)
+        plugin.parameters[sustain].raw_value = 0.2
+        second = plugin.process([], 0.3, SAMPLE_RATE, reset=False)
+    audio = np.concatenate([first, second], axis=1)
+    step = max_step(audio)
+    later = float(np.abs(second[:, int(0.1 * SAMPLE_RATE):]).max())
+    assert step < CLICK_THRESHOLD, f"Click: a {step:.4f} step when Sustain changed"
+    assert later < 0.25 * 0.3, f"Level did not follow the new sustain (peak {later:.3f})"
+    return f"largest step={step:.4f}  peak after the change={later:.3f}"
+
+
 def test_close_events_sample_accurate(plugin):
     """Two notes 20 samples apart in the same block each start on their own sample.
 
@@ -406,6 +474,8 @@ TESTS = [
     ("No stuck note",     test_no_stuck_note_on_mode_change),
     ("Close events",      test_close_events_sample_accurate),
     ("Headroom",          test_headroom),
+    ("Release mid-decay", test_release_mid_decay),
+    ("Sustain change",    test_sustain_change_while_held),
 ]
 
 
