@@ -48,4 +48,4 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release
 
       - name: Build VST3
-        run: cmake --build build --target BasicSynth_VST3
+        run: cmake --build build --target NeonSynth_VST3
