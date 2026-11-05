@@ -176,6 +176,8 @@ ctest --test-dir build -C Release --output-on-failure
 | `StepSequencerTests` | Sequencer timing, gate, swing, rates, block-size independence, stop and loop handling, tolerance of small transport drift, triggers disabled, retriggering, step packing (15 checks) |
 | `VoiceEnvelopeTests` | The voice envelope: identical to `juce::ADSR` with fixed settings, releases that survive parameter updates, sustain slew, retriggering, release-time changes (6 checks) |
 | `OscillatorTests` | The oscillator: pitch and DC offset of every waveform, level at high pitch, band-limited saw step, waveform changes waiting for the cycle boundary, phase kept across pitch changes (16 checks) |
+| `SampleDataTests` | The sample: mono mix, −1 dBFS normalisation, 24-bit grid, 60 s cap, decimated copies (pitch kept, aliasing removed), exact FLAC round trip, file loading, the built-in pad, and the lock-free hand-off freeing replaced samples only when safe, including 2000 swaps under load (39 checks) |
+| `RealtimeSafetyTests` | Hooks `operator new`/`delete` and fails if `processBlock` allocates or frees while rendering chords, the sequencer and every waveform as another thread keeps replacing the sample |
 | `RenderBenchmark` | Times `processBlock` directly (no host) for idle, one note, 16 voices and a dense sequencer + chords load |
 
 ### Performance
@@ -316,6 +318,9 @@ a fixed 120 BPM tempo, with real time preserved via tick timing.
 | Release mid-decay | With Sustain 0, a note released during its decay fades over the Release time without a click |
 | Sustain change | Changing Sustain while a note is held ramps the level instead of clicking |
 | State round trip | The pattern is saved and restored; a state without a pattern loads the default |
+| Sample state | A file named in the state loads and is embedded as FLAC; another instance restores it from the embedded copy after the file is deleted; a missing sample keeps its reference; a v1.4 state loads the built-in pad |
+| Channel 16 key | A keyboard note on channel 16 survives the sequencer playing the same pitch |
+| Log per instance | Two instances logging MIDI each write their own file |
 
 ### Using the API directly
 
@@ -381,6 +386,9 @@ audio_bright = plugin.process(msgs, 2.5, SR, reset=True)
 |---|---|
 | `NeonSynthVoice.h` | Voice and sound classes — sound source, filter, envelope, pan |
 | `Oscillator.h` | The band-limited oscillator (sine, square, triangle, sawtooth with PolyBLEP) |
+| `SampleData.h` | A prepared sample: mono, normalised, 24-bit grid, with 1/2- and 1/4-rate copies |
+| `SampleSlot.h` | Lock-free hand-off of the current sample to the audio thread; frees replaced samples only when safe |
+| `SampleLoader.h` | Loads WAV, AIFF and FLAC files and embedded FLAC; renders the built-in pad |
 | `NeonSynthProcessor.h/cpp` | `AudioProcessor` — parameter management, MIDI, state |
 | `NeonSynthEditor.h` | Neon UI — layout, controls, resizing, the 30 Hz timer that feeds the visualisers |
 | `MidiLogger.h` | Real-time-safe MIDI logging (lock-free FIFO + background writer thread) |
@@ -391,6 +399,8 @@ audio_bright = plugin.process(msgs, 2.5, SR, reset=True)
 | `tests/StepSequencerTests.cpp` | Unit tests for the sequencer engine (`-DNEONSYNTH_BUILD_TESTS=ON`) |
 | `tests/VoiceEnvelopeTests.cpp` | Unit tests for the voice envelope |
 | `tests/OscillatorTests.cpp` | Unit tests for the oscillator |
+| `tests/SampleDataTests.cpp` | Unit tests for the sample, its loader and the hand-off |
+| `tests/RealtimeSafetyTests.cpp` | Fails if `processBlock` allocates |
 | `tests/RenderBenchmark.cpp` | CPU benchmark of `processBlock` |
 | `Visualisers.h` | Oscilloscope, spectrum analyser, ADSR graph, voice lights and L/R meter (message thread only) |
 | `CMakeLists.txt` | Build config — Standalone + VST3, JUCE path, binary resources |

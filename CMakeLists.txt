@@ -49,6 +49,9 @@ target_sources(NeonSynth
         HelpOverlay.h
         VoiceEnvelope.h
         Oscillator.h
+        SampleData.h
+        SampleSlot.h
+        SampleLoader.h
 )
 
 target_compile_definitions(NeonSynth
@@ -83,8 +86,9 @@ target_include_directories(NeonSynth
 
 # ---------------------------------------------------------------------------
 # Optional unit tests: the step sequencer engine (StepSequencer.h), the voice
-# envelope (VoiceEnvelope.h) and the oscillator (Oscillator.h). They only need
-# juce_audio_basics, so they build in a few seconds once JUCE is compiled:
+# envelope (VoiceEnvelope.h), the oscillator (Oscillator.h) and the sample
+# (SampleData.h, SampleSlot.h, SampleLoader.h). They only need JUCE's audio
+# modules, so they build in a few seconds once JUCE is compiled:
 #   cmake -B build -DJUCE_DIR=... -DNEONSYNTH_BUILD_TESTS=ON
 #   cmake --build build --config Release --target unit_tests
 #   ctest --test-dir build -C Release --output-on-failure
@@ -95,7 +99,7 @@ option(NEONSYNTH_BUILD_TESTS "Build the unit tests and the render benchmark" OFF
 
 if(NEONSYNTH_BUILD_TESTS)
     enable_testing()
-    set(NEONSYNTH_UNIT_TESTS StepSequencerTests VoiceEnvelopeTests OscillatorTests)
+    set(NEONSYNTH_UNIT_TESTS StepSequencerTests VoiceEnvelopeTests OscillatorTests SampleDataTests)
     add_custom_target(unit_tests)
 
     foreach(test ${NEONSYNTH_UNIT_TESTS})
@@ -106,26 +110,34 @@ if(NEONSYNTH_BUILD_TESTS)
             JUCE_USE_CURL=0)
         target_link_libraries(${test} PRIVATE
             juce::juce_audio_basics
+            juce::juce_audio_formats
             juce::juce_recommended_config_flags
             juce::juce_recommended_warning_flags)
         add_dependencies(unit_tests ${test})
         add_test(NAME ${test} COMMAND ${test})
     endforeach()
 
-    # Times processBlock directly (no host, no Python) for a few load scenarios.
-    juce_add_console_app(RenderBenchmark PRODUCT_NAME "RenderBenchmark")
-    juce_generate_juce_header(RenderBenchmark)
-    target_sources(RenderBenchmark PRIVATE tests/RenderBenchmark.cpp NeonSynthProcessor.cpp)
-    target_include_directories(RenderBenchmark PRIVATE ${CMAKE_CURRENT_LIST_DIR})
-    target_compile_definitions(RenderBenchmark PRIVATE
-        JUCE_WEB_BROWSER=0
-        JUCE_USE_CURL=0)
-    target_link_libraries(RenderBenchmark PRIVATE
-        NeonSynthResources
-        juce::juce_audio_utils
-        juce::juce_audio_processors
-        juce::juce_dsp
-        juce::juce_recommended_config_flags
-        juce::juce_recommended_lto_flags
-        juce::juce_recommended_warning_flags)
+    # Programs that drive the whole processor directly (no host, no Python):
+    #   RenderBenchmark      times processBlock for a few load scenarios
+    #   RealtimeSafetyTests  fails if processBlock allocates (also run by ctest)
+    foreach(program RenderBenchmark RealtimeSafetyTests)
+        juce_add_console_app(${program} PRODUCT_NAME "${program}")
+        juce_generate_juce_header(${program})
+        target_sources(${program} PRIVATE tests/${program}.cpp NeonSynthProcessor.cpp)
+        target_include_directories(${program} PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+        target_compile_definitions(${program} PRIVATE
+            JUCE_WEB_BROWSER=0
+            JUCE_USE_CURL=0)
+        target_link_libraries(${program} PRIVATE
+            NeonSynthResources
+            juce::juce_audio_utils
+            juce::juce_audio_processors
+            juce::juce_dsp
+            juce::juce_recommended_config_flags
+            juce::juce_recommended_lto_flags
+            juce::juce_recommended_warning_flags)
+    endforeach()
+
+    add_dependencies(unit_tests RealtimeSafetyTests)
+    add_test(NAME RealtimeSafetyTests COMMAND RealtimeSafetyTests)
 endif()

@@ -135,9 +135,20 @@ NeonSynthProcessor::NeonSynthProcessor()
     seqModeParameter       = getTypedParameter<juce::AudioParameterChoice> (apvts, "seqMode");
 
     loadDefaultPattern();
+    publishSample (SampleLoader::makeDefaultSample());
 
     if (const auto path = findMidiLogPath (wrapperType); path.isNotEmpty())
         midiLogger.start (midiLogFileForNewInstance (path));
+}
+
+NeonSynthProcessor::~NeonSynthProcessor()
+{
+    sampleLoader.removeAllJobs (true, 10000);   // a running load finishes before the slot it publishes into goes away
+}
+
+void NeonSynthProcessor::releaseResources()
+{
+    sampleSlot.setAudioRunning (false);   // nothing reads the sample while stopped: replaced ones can be freed now
 }
 
 void NeonSynthProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
@@ -156,6 +167,8 @@ void NeonSynthProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     playMidi.ensureSize (8192);   // bytes; far more than a block of keyboard + sequencer events needs
     internalBeat   = 0.0;
     numHeldKeys    = 0;
+
+    sampleSlot.setAudioRunning (true);
 }
 
 void NeonSynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
@@ -167,6 +180,7 @@ void NeonSynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
     // audio. Add an input bus if you want to mix or modulate external sound here.
     buffer.clear();
     midiLogger.push (midiMessages, samplesProcessed);   // lock-free; formatting/I/O happen elsewhere
+    blockSample = sampleSlot.beginBlock();   // the voices' sample for this block (used by the sample sources from P2)
 
     NeonSynthVoice::Params params;
     params.waveform = waveformParameter->getIndex();
@@ -266,11 +280,24 @@ namespace
     /**
         Saved-state format version, written as an attribute of the state tree.
           (none) v1.0 - v1.3: parameters, the editor's view and, from v1.3, the pattern
-          2      v1.4+: same content; the attribute exists so later format changes
+          2      v1.4: same content; the attribute exists so later format changes
                  can tell old sessions apart and migrate them
+          3      v1.5+: adds the Sample child (the sample, embedded or by path);
+                 older states load with the built-in pad
     */
     const juce::Identifier stateVersionId { "stateVersion" };
-    constexpr int currentStateVersion = 2;
+    constexpr int currentStateVersion = 3;
+
+    // State tree layout for the sample (v1.5.0+):
+    //   <Sample default="1"/>                                  the built-in pad
+    //   <Sample name="pad.wav" path="C:/..." hash="..." flac="<base64>"/>
+    // flac is the sample itself as 24-bit FLAC, left out above 10 MB (the path is used then).
+    const juce::Identifier sampleId        { "Sample" };
+    const juce::Identifier sampleDefaultId { "default" };
+    const juce::Identifier sampleNameId    { "name" };
+    const juce::Identifier samplePathId    { "path" };
+    const juce::Identifier sampleHashId    { "hash" };
+    const juce::Identifier sampleFlacId    { "flac" };
 
     /** Keyboard input is played on this channel; the sequencer has StepSequencer::midiChannel (16). */
     constexpr int keyboardChannel = 1;
@@ -432,6 +459,84 @@ void NeonSynthProcessor::buildPlayMidi (const juce::MidiBuffer& input, int numSa
 }
 
 //==============================================================================
+// Sample
+
+void NeonSynthProcessor::publishSample (std::unique_ptr<SampleData> sample, const SampleData::Origin* missing)
+{
+    {
+        const juce::ScopedLock sl (sampleInfoLock);
+        missingSample     = missing != nullptr ? *missing : SampleData::Origin{};
+        missingSampleHash = {};
+        sampleProblem     = missing != nullptr ? "sample missing: " + missing->name : juce::String();
+    }
+    sampleSlot.publish (std::move (sample));
+}
+
+void NeonSynthProcessor::loadSampleFileAsync (const juce::File& file)
+{
+    const int generation = ++sampleLoadGeneration;
+    sampleLoading = true;
+
+    sampleLoader.addJob ([this, file, generation]
+    {
+        auto result = SampleLoader::loadFile (file);
+
+        if (generation != sampleLoadGeneration.load())
+            return;   // a newer load was requested meanwhile
+
+        if (result.sample != nullptr)
+            publishSample (std::move (result.sample));
+        else
+        {
+            const juce::ScopedLock sl (sampleInfoLock);
+            sampleProblem = file.getFileName() + ": " + result.error;
+        }
+
+        sampleLoading = false;
+        updateHostDisplay (ChangeDetails().withNonParameterStateChanged (true));
+    });
+}
+
+bool NeonSynthProcessor::loadSampleFile (const juce::File& file, juce::String& error)
+{
+    ++sampleLoadGeneration;   // supersedes any background load still running
+    auto result = SampleLoader::loadFile (file);
+
+    if (result.sample == nullptr)
+    {
+        error = result.error;
+        return false;
+    }
+
+    publishSample (std::move (result.sample));
+    return true;
+}
+
+void NeonSynthProcessor::useDefaultSample()
+{
+    ++sampleLoadGeneration;
+    publishSample (SampleLoader::makeDefaultSample());
+}
+
+NeonSynthProcessor::SampleStatus NeonSynthProcessor::getSampleStatus() const
+{
+    SampleStatus status;
+    sampleSlot.withCurrent ([&] (const SampleData* sample)
+    {
+        if (sample != nullptr)
+        {
+            status.name    = sample->getOrigin().name;
+            status.seconds = sample->getLengthSeconds();
+        }
+    });
+
+    const juce::ScopedLock sl (sampleInfoLock);
+    status.problem = sampleProblem;
+    status.loading = sampleLoading.load();
+    return status;
+}
+
+//==============================================================================
 // State
 
 void NeonSynthProcessor::getStateInformation (juce::MemoryBlock& destData)
@@ -455,6 +560,37 @@ void NeonSynthProcessor::getStateInformation (juce::MemoryBlock& destData)
         pattern.appendChild (step, nullptr);
     }
     state.appendChild (pattern, nullptr);
+
+    if (auto previous = state.getChildWithName (sampleId); previous.isValid())
+        state.removeChild (previous, nullptr);
+
+    juce::ValueTree sampleTree (sampleId);
+    sampleSlot.withCurrent ([&] (const SampleData* sample)
+    {
+        const juce::ScopedLock sl (sampleInfoLock);
+
+        if (missingSample.path.isNotEmpty())
+        {
+            // The session's sample couldn't be found: keep pointing at it, so saving doesn't lose it.
+            sampleTree.setProperty (sampleNameId, missingSample.name, nullptr);
+            sampleTree.setProperty (samplePathId, missingSample.path, nullptr);
+            if (missingSampleHash.isNotEmpty())
+                sampleTree.setProperty (sampleHashId, missingSampleHash, nullptr);
+        }
+        else if (sample == nullptr || sample->getOrigin().isDefault)
+        {
+            sampleTree.setProperty (sampleDefaultId, true, nullptr);
+        }
+        else
+        {
+            sampleTree.setProperty (sampleNameId, sample->getOrigin().name, nullptr);
+            sampleTree.setProperty (samplePathId, sample->getOrigin().path, nullptr);
+            sampleTree.setProperty (sampleHashId, sample->getHash(), nullptr);
+            if (sample->getEmbeddedFlac().getSize() > 0)
+                sampleTree.setProperty (sampleFlacId, sample->getEmbeddedFlac().toBase64Encoding(), nullptr);
+        }
+    });
+    state.appendChild (sampleTree, nullptr);
 
     if (auto xml = state.createXml())
         copyXmlToBinary (*xml, destData);
@@ -482,6 +618,73 @@ void NeonSynthProcessor::setStateInformation (const void* data, int sizeInBytes)
                                 (int)  step.getProperty (noteId, 60),
                                 (int)  step.getProperty (velocityId, 100) });
     }
+
+    restoreSample (tree.getChildWithName (sampleId));
+}
+
+void NeonSynthProcessor::restoreSample (const juce::ValueTree& sampleTree)
+{
+    ++sampleLoadGeneration;   // a background load started before this state arrived must not win
+
+    // No Sample child (states before v1.5.0) or the default: the built-in pad.
+    if (! sampleTree.isValid() || (bool) sampleTree.getProperty (sampleDefaultId, false))
+    {
+        if (! sampleSlot.withCurrent ([] (const SampleData* current) { return current != nullptr && current->getOrigin().isDefault; }))
+        {
+            publishSample (SampleLoader::makeDefaultSample());
+        }
+        else
+        {
+            const juce::ScopedLock sl (sampleInfoLock);   // already the pad: just forget any missing-sample note
+            missingSample = {};
+            missingSampleHash = {};
+            sampleProblem = {};
+        }
+        return;
+    }
+
+    const SampleData::Origin origin { sampleTree.getProperty (sampleNameId).toString(),
+                                      sampleTree.getProperty (samplePathId).toString(), false };
+    const auto hash = sampleTree.getProperty (sampleHashId).toString();
+
+    // Already loaded (a host re-sending the same state): nothing to do.
+    if (sampleSlot.withCurrent ([&] (const SampleData* current)
+            { return current != nullptr && hash.isNotEmpty() && current->getHash() == hash && ! current->getOrigin().isDefault; }))
+    {
+        const juce::ScopedLock sl (sampleInfoLock);
+        missingSample = {};
+        sampleProblem = {};
+        return;
+    }
+
+    // 1. The embedded copy.
+    if (const auto encoded = sampleTree.getProperty (sampleFlacId).toString(); encoded.isNotEmpty())
+    {
+        juce::MemoryBlock flac;
+        if (flac.fromBase64Encoding (encoded))
+        {
+            if (auto result = SampleLoader::loadEmbeddedFlac (flac, origin); result.sample != nullptr)
+            {
+                publishSample (std::move (result.sample));
+                return;
+            }
+        }
+    }
+
+    // 2. The file, where it was saved from.
+    if (origin.path.isNotEmpty())
+    {
+        if (auto result = SampleLoader::loadFile (juce::File (origin.path)); result.sample != nullptr)
+        {
+            publishSample (std::move (result.sample));
+            return;
+        }
+    }
+
+    // 3. Neither: play the built-in pad, but remember the sample so saving keeps the reference.
+    publishSample (SampleLoader::makeDefaultSample(), &origin);
+    const juce::ScopedLock sl (sampleInfoLock);
+    missingSampleHash = hash;
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
