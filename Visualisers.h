@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include "NeonSynthProcessor.h"
+#include <tuple>
 
 /*
     GUI-side visualisers for Neon Synth.
@@ -8,6 +9,10 @@
     Everything here runs on the message thread. Audio reaches it only through
     the processor's lock-free scope FIFO and the per-voice atomics, both read
     from the editor's timer - nothing in this file touches the audio thread.
+
+    Repaint economy: the timer calls update() 30 times a second, but each view
+    repaints only when what it would draw has changed. When the synth is silent
+    and the displays have settled, nothing repaints at all.
 */
 
 namespace neon
@@ -127,8 +132,20 @@ public:
         }
 
         // Auto-range with a slow release so the trace keeps a steady size.
-        range  = juce::jmax (peak, range * 0.92f, 0.02f);
-        lockHz = lowestNoteHz;
+        const float newRange = juce::jmax (peak, range * 0.92f, 0.02f);
+
+        // Silence that is already on screen needs no repaint (the flat line and
+        // its label don't change while the range shrinks towards its floor).
+        const bool silent = peak == 0.0f;
+        if (silent && shownSilent && lowestNoteHz == lockHz)
+        {
+            range = newRange;
+            return;
+        }
+
+        range       = newRange;
+        lockHz      = lowestNoteHz;
+        shownSilent = silent;
         repaint();
     }
 
@@ -153,13 +170,39 @@ public:
         juce::Path trace;
         const float midY   = area.getCentreY();
         const float yScale = area.getHeight() * 0.45f / range;
+        const int   columns = juce::jmax (2, juce::roundToInt (area.getWidth()));
 
-        for (int i = 0; i < displayLength; ++i)
+        if (displayLength <= 2 * columns)
         {
-            const float x = area.getX() + area.getWidth() * (float) i / (float) (displayLength - 1);
-            const float y = midY - display[(size_t) i] * yScale;
-            if (i == 0) trace.startNewSubPath (x, y);
-            else        trace.lineTo (x, y);
+            for (int i = 0; i < displayLength; ++i)
+            {
+                const float x = area.getX() + area.getWidth() * (float) i / (float) (displayLength - 1);
+                const float y = midY - display[(size_t) i] * yScale;
+                if (i == 0) trace.startNewSubPath (x, y);
+                else        trace.lineTo (x, y);
+            }
+        }
+        else
+        {
+            // More samples than pixels: one min/max pair per pixel column keeps
+            // every peak while stroking at most 2 points per column (the glow
+            // strokes the path three times, so this is where the GUI time goes).
+            for (int c = 0; c < columns; ++c)
+            {
+                const int first = c * displayLength / columns;
+                const int last  = juce::jmax (first + 1, (c + 1) * displayLength / columns);
+                float lo = display[(size_t) first], hi = lo;
+                for (int i = first + 1; i < last; ++i)
+                {
+                    lo = juce::jmin (lo, display[(size_t) i]);
+                    hi = juce::jmax (hi, display[(size_t) i]);
+                }
+                const float x = area.getX() + area.getWidth() * (float) c / (float) (columns - 1);
+                if (c == 0) trace.startNewSubPath (x, midY - hi * yScale);
+                else        trace.lineTo (x, midY - hi * yScale);
+                if (lo != hi)
+                    trace.lineTo (x, midY - lo * yScale);
+            }
         }
         neon::strokeGlow (g, trace, neon::cyan);
 
@@ -183,6 +226,7 @@ private:
     int   displayLength = 1024;
     float range = 0.25f;
     float lockHz = 0.0f;
+    bool  shownSilent = false;   // the last repaint showed silence
 };
 
 //==============================================================================
@@ -206,6 +250,7 @@ public:
 
     void update (const SignalHistory& history, double newSampleRate, float newCutoffHz, bool newFilterOn)
     {
+        const bool filterChanged = newCutoffHz != cutoffHz || newFilterOn != filterOn || newSampleRate != sampleRate;
         sampleRate = newSampleRate > 0.0 ? newSampleRate : 44100.0;
         cutoffHz   = newCutoffHz;
         filterOn   = newFilterOn;
@@ -220,6 +265,7 @@ public:
         const double binHz = sampleRate / fftSize;
         const float  norm  = 2.0f / windowSum;   // full-scale sine -> 0 dBFS
         constexpr float fallPerFrame = 1.5f;     // dB, gives peaks a gentle decay
+        bool levelsChanged = false;
 
         for (int i = 0; i < numPoints; ++i)
         {
@@ -242,11 +288,15 @@ public:
                     magnitude = juce::jmax (magnitude, fftData[(size_t) k]);
             }
 
-            const float db = juce::Decibels::gainToDecibels (magnitude * norm, minDb);
-            levels[(size_t) i] = juce::jmax (db, levels[(size_t) i] - fallPerFrame);
+            const float db   = juce::Decibels::gainToDecibels (magnitude * norm, minDb);
+            const float next = juce::jmax (db, levels[(size_t) i] - fallPerFrame, minDb);
+            levelsChanged = levelsChanged || next != levels[(size_t) i];
+            levels[(size_t) i] = next;
         }
 
-        repaint();
+        // Once silence has decayed to the floor, the picture stops changing.
+        if (levelsChanged || filterChanged)
+            repaint();
     }
 
     void paint (juce::Graphics& g) override
@@ -390,10 +440,19 @@ public:
         channels[0].update (left,  numSamples, fall, framesPerSecond * 3 / 2, clipped);
         channels[1].update (right, numSamples, fall, framesPerSecond * 3 / 2, clipped);
 
+        const bool wasLit = clipFrames > 0;
         if (clipped)             clipFrames = framesPerSecond * 2;
         else if (clipFrames > 0) --clipFrames;
 
-        repaint();
+        // Repaint only when a bar, a peak line or the light moved.
+        bool changed = (clipFrames > 0) != wasLit;
+        for (size_t ch = 0; ch < channels.size(); ++ch)
+        {
+            changed = changed || ! channels[ch].sameAs (shown[ch]);
+            shown[ch] = channels[ch];
+        }
+        if (changed)
+            repaint();
     }
 
     void mouseDown (const juce::MouseEvent&) override
@@ -468,6 +527,11 @@ private:
         float rmsLevel = minDb, peakLevel = minDb, heldPeak = minDb;
         int   holdFrames = 0;
 
+        bool sameAs (const Channel& other) const noexcept
+        {
+            return rmsLevel == other.rmsLevel && peakLevel == other.peakLevel && heldPeak == other.heldPeak;
+        }
+
         void update (const float* samples, int numSamples, float fall, int holdLength, bool& clipped)
         {
             float peak = 0.0f, sumSquares = 0.0f;
@@ -490,7 +554,7 @@ private:
         }
     };
 
-    std::array<Channel, 2> channels {};
+    std::array<Channel, 2> channels {}, shown {};
     int clipFrames = 0;
 };
 
@@ -519,6 +583,10 @@ public:
         attackW *= scale;  decayW *= scale;  releaseW *= scale;
         sustainLevel = sustain;
 
+        const auto previousShape   = std::make_tuple (shownAttackW, shownDecayW, shownReleaseW, shownSustain);
+        const auto previousMarkers = markers;
+        const int  previousCount   = numMarkers;
+
         numMarkers = 0;
         for (const auto& v : voices)
         {
@@ -537,7 +605,16 @@ public:
             markers[(size_t) numMarkers++] = { x, v.level.load (std::memory_order_relaxed) };
         }
 
-        repaint();
+        // Repaint only when the shape or a voice dot moved.
+        bool changed = std::make_tuple (attackW, decayW, releaseW, sustainLevel) != previousShape
+                    || numMarkers != previousCount;
+        for (int i = 0; ! changed && i < numMarkers; ++i)
+            changed = markers[(size_t) i].x != previousMarkers[(size_t) i].x
+                   || markers[(size_t) i].level != previousMarkers[(size_t) i].level;
+
+        shownAttackW = attackW;  shownDecayW = decayW;  shownReleaseW = releaseW;  shownSustain = sustainLevel;
+        if (changed)
+            repaint();
     }
 
     void paint (juce::Graphics& g) override
@@ -587,6 +664,7 @@ private:
     float releaseStart() const noexcept { return 1.0f - releaseW; }
 
     float attackW = 0.2f, decayW = 0.2f, releaseW = 0.38f, sustainLevel = 0.7f;
+    float shownAttackW = -1.0f, shownDecayW = -1.0f, shownReleaseW = -1.0f, shownSustain = -1.0f;   // last repainted shape
     std::array<Marker, NeonSynthProcessor::numVoices> markers {};
     int numMarkers = 0;
 };

@@ -21,7 +21,8 @@
     page drawn over the whole editor.
 
     A 30 Hz timer drains the processor's lock-free scope FIFO and reads the
-    per-voice atomics; it is the only path from audio to GUI.
+    per-voice atomics; it is the only path from audio to GUI. Each view repaints
+    only when what it shows has changed, so an idle editor costs almost nothing.
 */
 class NeonSynthEditor : public juce::AudioProcessorEditor,
                          private juce::Timer
@@ -201,8 +202,17 @@ public:
         getConstrainer()->setFixedAspectRatio ((double) baseWidth / (double) baseHeight);
         setSize (baseWidth, baseHeight);
 
+        // While the editor was closed the scope FIFO filled up with old audio;
+        // throw it away so the first frame shows what is playing now.
+        while (processor.drainScope (scratchLeft.data(), scratchRight.data(), (int) scratchLeft.size()) > 0) {}
+
         updateReadouts();
         startTimerHz (timerHz);
+    }
+
+    ~NeonSynthEditor() override
+    {
+        stopTimer();   // the Timer base outlives our members; make sure no tick can arrive mid-teardown
     }
 
     void resized() override
