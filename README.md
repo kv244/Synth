@@ -163,17 +163,19 @@ Before v1.4 the plugin was called **BasicSynth**. It is now **NeonSynth** (`Neon
 
 ## Unit tests and benchmark
 
-Configure with `-DNEONSYNTH_BUILD_TESTS=ON` to add three console programs:
+Configure with `-DNEONSYNTH_BUILD_TESTS=ON` to add the unit tests and the benchmark. `ctest` runs every unit test:
 
 ```bash
 cmake -S . -B build -DJUCE_DIR="/path/to/JUCE" -DNEONSYNTH_BUILD_TESTS=ON
-cmake --build build --config Release --target StepSequencerTests VoiceEnvelopeTests RenderBenchmark
+cmake --build build --config Release --target unit_tests RenderBenchmark
+ctest --test-dir build -C Release --output-on-failure
 ```
 
 | Program | What it checks |
 |---|---|
 | `StepSequencerTests` | Sequencer timing, gate, swing, rates, block-size independence, stop and loop handling, tolerance of small transport drift, triggers disabled, retriggering, step packing (15 checks) |
 | `VoiceEnvelopeTests` | The voice envelope: identical to `juce::ADSR` with fixed settings, releases that survive parameter updates, sustain slew, retriggering, release-time changes (6 checks) |
+| `OscillatorTests` | The oscillator: pitch and DC offset of every waveform, level at high pitch, band-limited saw step, waveform changes waiting for the cycle boundary, phase kept across pitch changes (16 checks) |
 | `RenderBenchmark` | Times `processBlock` directly (no host) for idle, one note, 16 voices and a dense sequencer + chords load |
 
 ### Performance
@@ -377,7 +379,8 @@ audio_bright = plugin.process(msgs, 2.5, SR, reset=True)
 
 | File | Purpose |
 |---|---|
-| `NeonSynthVoice.h` | Voice and sound classes — oscillator, filter, envelope |
+| `NeonSynthVoice.h` | Voice and sound classes — sound source, filter, envelope, pan |
+| `Oscillator.h` | The band-limited oscillator (sine, square, triangle, sawtooth with PolyBLEP) |
 | `NeonSynthProcessor.h/cpp` | `AudioProcessor` — parameter management, MIDI, state |
 | `NeonSynthEditor.h` | Neon UI — layout, controls, resizing, the 30 Hz timer that feeds the visualisers |
 | `MidiLogger.h` | Real-time-safe MIDI logging (lock-free FIFO + background writer thread) |
@@ -387,6 +390,7 @@ audio_bright = plugin.process(msgs, 2.5, SR, reset=True)
 | `VoiceEnvelope.h` | The voice's ADSR envelope (slewed sustain, release rate fixed at note-off) |
 | `tests/StepSequencerTests.cpp` | Unit tests for the sequencer engine (`-DNEONSYNTH_BUILD_TESTS=ON`) |
 | `tests/VoiceEnvelopeTests.cpp` | Unit tests for the voice envelope |
+| `tests/OscillatorTests.cpp` | Unit tests for the oscillator |
 | `tests/RenderBenchmark.cpp` | CPU benchmark of `processBlock` |
 | `Visualisers.h` | Oscilloscope, spectrum analyser, ADSR graph, voice lights and L/R meter (message thread only) |
 | `CMakeLists.txt` | Build config — Standalone + VST3, JUCE path, binary resources |

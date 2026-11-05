@@ -48,6 +48,7 @@ target_sources(NeonSynth
         SequencerView.h
         HelpOverlay.h
         VoiceEnvelope.h
+        Oscillator.h
 )
 
 target_compile_definitions(NeonSynth
@@ -81,17 +82,23 @@ target_include_directories(NeonSynth
 )
 
 # ---------------------------------------------------------------------------
-# Optional unit tests for the step sequencer engine (StepSequencer.h) and the
-# voice envelope (VoiceEnvelope.h). They only need juce_audio_basics, so they
-# build in a few seconds once JUCE is compiled:
+# Optional unit tests: the step sequencer engine (StepSequencer.h), the voice
+# envelope (VoiceEnvelope.h) and the oscillator (Oscillator.h). They only need
+# juce_audio_basics, so they build in a few seconds once JUCE is compiled:
 #   cmake -B build -DJUCE_DIR=... -DNEONSYNTH_BUILD_TESTS=ON
-#   cmake --build build --config Release --target StepSequencerTests VoiceEnvelopeTests
-# Each executable exits non-zero if any test fails.
+#   cmake --build build --config Release --target unit_tests
+#   ctest --test-dir build -C Release --output-on-failure
+# Each executable exits non-zero if any test fails. A new test only needs its
+# name added to NEONSYNTH_UNIT_TESTS; CI runs everything ctest knows about.
 # ---------------------------------------------------------------------------
-option(NEONSYNTH_BUILD_TESTS "Build the StepSequencer and VoiceEnvelope unit tests" OFF)
+option(NEONSYNTH_BUILD_TESTS "Build the unit tests and the render benchmark" OFF)
 
 if(NEONSYNTH_BUILD_TESTS)
-    foreach(test StepSequencerTests VoiceEnvelopeTests)
+    enable_testing()
+    set(NEONSYNTH_UNIT_TESTS StepSequencerTests VoiceEnvelopeTests OscillatorTests)
+    add_custom_target(unit_tests)
+
+    foreach(test ${NEONSYNTH_UNIT_TESTS})
         juce_add_console_app(${test} PRODUCT_NAME "${test}")
         target_sources(${test} PRIVATE tests/${test}.cpp)
         target_compile_definitions(${test} PRIVATE
@@ -101,6 +108,8 @@ if(NEONSYNTH_BUILD_TESTS)
             juce::juce_audio_basics
             juce::juce_recommended_config_flags
             juce::juce_recommended_warning_flags)
+        add_dependencies(unit_tests ${test})
+        add_test(NAME ${test} COMMAND ${test})
     endforeach()
 
     # Times processBlock directly (no host, no Python) for a few load scenarios.

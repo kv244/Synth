@@ -5,6 +5,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include "VoiceEnvelope.h"
+#include "Oscillator.h"
 
 class NeonSynthSound : public juce::SynthesiserSound
 {
@@ -14,7 +15,11 @@ public:
 };
 
 /**
-    One synth voice: band-limited oscillator -> ADSR (VoiceEnvelope) -> TPT low-pass -> pan.
+    One synth voice: sound source -> ADSR (VoiceEnvelope) -> TPT low-pass -> pan.
+
+    The source is chosen per note (see Source). Today there is one, the
+    band-limited oscillator in Oscillator.h; the sample and granular sources
+    plug in at nextSourceSample(), so nothing after it changes.
 
     Stereo: each voice is panned by its pitch (C4 in the centre, two octaves
     either side reaching the edges), scaled by the Width parameter. The pan law
@@ -28,10 +33,13 @@ public:
 class NeonSynthVoice : public juce::SynthesiserVoice
 {
 public:
+    /** Where a note's sound comes from. Sample and Granular follow in v1.5.0. */
+    enum class Source { oscillator };
+
     /** Parameter snapshot, read once per block on the audio thread. */
     struct Params
     {
-        int   waveform = 0;            // 0 Sine, 1 Square, 2 Triangle, 3 Sawtooth
+        int   waveform = 0;            // PolyBlepOscillator::Waveform: 0 Sine, 1 Square, 2 Triangle, 3 Sawtooth
         float cutoffHz = 2000.0f;
         bool  filterOn = true;
         float width = 0.0f;            // stereo width, 0 = mono .. 1 = full spread
@@ -99,7 +107,7 @@ public:
         if (! hardStopping)
             adsr.setParameters (adsrParams);
 
-        pendingWaveform = p.waveform;                     // applied at the next phase wrap
+        oscillator.setWaveform (p.waveform);              // applied at the next cycle boundary
         cutoff.setTargetValue (clampCutoff (p.cutoffHz));
         filterMix.setTargetValue (p.filterOn ? 1.0f : 0.0f);
 
@@ -111,7 +119,7 @@ public:
     {
         // Set the pitch directly: no glide from the previous note.
         frequencyHz     = (float) juce::MidiMessage::getMidiNoteInHertz (midiNote);
-        phaseInc        = (float) (frequencyHz / sampleRate);
+        oscillator.setFrequency (frequencyHz, sampleRate);
         samplesSinceOn  = 0;
         samplesSinceOff = -1;
 
@@ -187,7 +195,7 @@ public:
                 filter.setCutoffFrequency (cutoff.getNextValue());
 
             lastEnvelope    = adsr.getNextSample();
-            const float dry = nextOscillatorSample() * level.getNextValue() * lastEnvelope;
+            const float dry = nextSourceSample() * level.getNextValue() * lastEnvelope;
             const float wet = filter.processSample (0, dry);   // always run: state stays warm
             const float out = dry + filterMix.getNextValue() * (wet - dry);
 
@@ -233,58 +241,20 @@ private:
         return juce::jlimit (20.0f, 0.45f * (float) sampleRate, hz);   // stay well below Nyquist
     }
 
-    /** PolyBLEP residual: removes most aliasing from a step discontinuity. */
-    static float polyBlep (float t, float dt) noexcept
+    /** The current note's sound source, one sample. */
+    float nextSourceSample() noexcept
     {
-        if (t < dt)
+        switch (source)
         {
-            t /= dt;
-            return t + t - t * t - 1.0f;
+            case Source::oscillator:
+            default:
+                return oscillator.nextSample();
         }
-        if (t > 1.0f - dt)
-        {
-            t = (t - 1.0f) / dt;
-            return t * t + t + t + 1.0f;
-        }
-        return 0.0f;
-    }
-
-    float nextOscillatorSample() noexcept
-    {
-        const float t  = phase;
-        const float dt = phaseInc;
-        float value;
-
-        switch (waveform)
-        {
-            case 1:  // Square
-                value = (t < 0.5f ? 1.0f : -1.0f)
-                      + polyBlep (t, dt)
-                      - polyBlep (std::fmod (t + 0.5f, 1.0f), dt);
-                break;
-            case 2:  // Triangle (continuous, so naive is fine)
-                value = t < 0.5f ? 4.0f * t - 1.0f : 3.0f - 4.0f * t;
-                break;
-            case 3:  // Sawtooth
-                value = 2.0f * t - 1.0f - polyBlep (t, dt);
-                break;
-            default: // Sine
-                value = std::sin (juce::MathConstants<float>::twoPi * t);
-                break;
-        }
-
-        phase += dt;
-        if (phase >= 1.0f)
-        {
-            phase -= 1.0f;
-            waveform = pendingWaveform;   // switch shapes only at the cycle boundary
-        }
-        return value;
     }
 
     double sampleRate = 44100.0;
-    float  phase = 0.0f, phaseInc = 0.0f;
-    int    waveform = 0, pendingWaveform = 0;
+    Source source = Source::oscillator;
+    PolyBlepOscillator oscillator;
     bool   hardStopping = false;
 
     // Telemetry for the GUI (written here on the audio thread, copied out by the processor).
