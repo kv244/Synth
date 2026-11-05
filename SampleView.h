@@ -103,7 +103,7 @@ public:
         const auto bounds = getLocalBounds().toFloat();
         neon::drawPanel (g, bounds, neon::cyan);
 
-        const bool active = markers.source != 0;   // dimmed while the oscillator plays
+        const bool active = markers.source == 1 || markers.source == 2;   // dimmed while the oscillator or Random plays
         const float alpha = active ? 1.0f : 0.35f;
         const auto inner = bounds.reduced (4.0f, 3.0f);
 
