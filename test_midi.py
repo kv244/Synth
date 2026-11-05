@@ -481,7 +481,7 @@ def sequencer_onsets(plugin) -> int:
 def test_state_round_trip(plugin):
     """The pattern is saved in the state and restored; a state without one loads the default."""
     xml = state_xml(plugin)
-    assert 'stateVersion="2"' in xml, "state has no stateVersion attribute"
+    assert 'stateVersion="3"' in xml, "state has no stateVersion attribute (or not version 3)"
     assert "<Pattern>" in xml, "state has no pattern"
 
     # Only step 0 on: one note per pass through the pattern
@@ -503,6 +503,82 @@ def test_state_round_trip(plugin):
     assert default == len(DEFAULT_PATTERN_ON_STEPS), \
         f"State without a pattern kept the previous one: {default} notes, expected {len(DEFAULT_PATTERN_ON_STEPS)}"
     return f"one-step pattern: {one_step} note  no pattern: {default} notes (default)"
+
+
+SAMPLE_ELEMENT = re.compile(r"<Sample\b[^>]*/>")
+
+
+def with_sample_element(xml: str, element: str | None) -> str:
+    """The state XML with its <Sample .../> element replaced (or removed when element is None)."""
+    replacement = element or ""
+    if SAMPLE_ELEMENT.search(xml):
+        return SAMPLE_ELEMENT.sub(lambda _: replacement, xml, count=1)
+    return xml.replace("</Pattern>", "</Pattern>" + replacement, 1)
+
+
+def sample_attributes(xml: str) -> dict:
+    match = SAMPLE_ELEMENT.search(xml)
+    assert match, "state has no <Sample> element"
+    return dict(re.findall(r'(\w+)="([^"]*)"', match.group(0)))
+
+
+def write_test_wav(path: str, seconds: float = 0.5, hz: float = 330.0, rate: int = 44100):
+    import wave
+    t = np.arange(int(seconds * rate)) / rate
+    data = (0.5 * np.sin(2 * np.pi * hz * t) * 32767).astype("<i2")
+    with wave.open(path, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(data.tobytes())
+
+
+def test_sample_state(plugin):
+    """The sample is saved in the state: embedded as FLAC, by path, or as the built-in pad.
+
+    A file referenced by path loads and gets embedded; a second instance then
+    restores it from the embedded copy even after the file is gone. A sample
+    that can't be found keeps its reference (so saving doesn't lose it), and a
+    v1.4 state without a <Sample> element loads the built-in pad."""
+    import tempfile
+    from xml.sax.saxutils import quoteattr
+    original = state_xml(plugin)
+    assert sample_attributes(original), "state has no <Sample> element"
+
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as folder:
+        wav = os.path.join(folder, "neon-test.wav")
+        write_test_wav(wav)
+
+        load_state_xml(plugin, with_sample_element(original, f'<Sample name="neon-test.wav" path={quoteattr(wav)}/>'))
+        by_path = sample_attributes(state_xml(plugin))
+        assert by_path.get("name") == "neon-test.wav" and "default" not in by_path, f"file by path did not load: {by_path}"
+        assert re.fullmatch(r"[0-9a-f]{16}", by_path.get("hash", "")), f"no content hash: {by_path}"
+        assert len(by_path.get("flac", "")) > 1000, "the loaded sample was not embedded as FLAC"
+        saved = state_xml(plugin)
+
+        os.remove(wav)   # from here on only the embedded copy exists
+        other = load_plugin()
+        load_state_xml(other, saved)
+        restored = sample_attributes(state_xml(other))
+        assert restored.get("hash") == by_path["hash"], f"embedded sample restored with a different hash: {restored.get('hash')}"
+        del other
+
+        missing_path = os.path.join(folder, "gone.wav")
+        load_state_xml(plugin, with_sample_element(original,
+                       f'<Sample name="gone.wav" path={quoteattr(missing_path)} hash="0123456789abcdef"/>'))
+        kept = sample_attributes(state_xml(plugin))
+        assert kept.get("path") == missing_path and kept.get("hash") == "0123456789abcdef" and "default" not in kept, \
+            f"missing sample's reference was not kept: {kept}"
+        set_params(plugin)
+        still_plays = rms(render(plugin, [60], note_dur_s=0.3))
+        assert still_plays > 1e-3, "plugin went silent after a missing sample"
+
+    v14 = with_sample_element(original, None).replace('stateVersion="3"', 'stateVersion="2"')
+    load_state_xml(plugin, v14)
+    old = sample_attributes(state_xml(plugin))
+    load_state_xml(plugin, original)
+    assert old.get("default") == "1", f"v1.4 state did not load the built-in pad: {old}"
+    return f"embedded FLAC {len(by_path['flac']) // 1024} KB, hash {by_path['hash']}; missing file kept; v1.4 state -> default pad"
 
 
 def test_keyboard_on_sequencer_channel(plugin):
@@ -624,6 +700,7 @@ TESTS = [
     ("Release mid-decay", test_release_mid_decay),
     ("Sustain change",    test_sustain_change_while_held),
     ("State round trip",  test_state_round_trip),
+    ("Sample state",      test_sample_state),
     ("Channel 16 key",    test_keyboard_on_sequencer_channel),
     ("Log per instance",  test_midi_log_per_instance),
 ]
