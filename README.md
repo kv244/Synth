@@ -1,5 +1,6 @@
 # Neon Synth
 
+[![Test](https://github.com/kv244/Synth/actions/workflows/test.yml/badge.svg)](https://github.com/kv244/Synth/actions/workflows/test.yml)
 [![Build](https://github.com/kv244/Synth/actions/workflows/build.yml/badge.svg)](https://github.com/kv244/Synth/actions/workflows/build.yml)
 [![Lint](https://github.com/kv244/Synth/actions/workflows/lint.yml/badge.svg)](https://github.com/kv244/Synth/actions/workflows/lint.yml)
 [![Release](https://github.com/kv244/Synth/actions/workflows/release.yml/badge.svg)](https://github.com/kv244/Synth/actions/workflows/release.yml)
@@ -36,6 +37,17 @@ Pre-built Windows installer: **[Latest release →](https://github.com/kv244/Syn
 Run `NeonSynth-x.y.z-Windows-Setup.exe`. The wizard installs the VST3 to
 `C:\Program Files\Common Files\VST3\` and optionally the standalone app to
 `C:\Program Files\AudioDSP\Neon Synth\`.
+
+---
+
+## Releasing
+
+Releases are published only from a version tag; merging to `master` publishes nothing.
+
+1. Set the new version in `CMakeLists.txt` (both places) and `installer.nsi`, and merge it to `master`.
+2. Tag it: `git tag v1.4.0 && git push origin v1.4.0`.
+
+The Release workflow refuses a tag that doesn't match `CMakeLists.txt`, or one that already has a release, then runs every test and pluginval at strictness 10 before building the installer.
 
 ---
 
@@ -187,7 +199,8 @@ MIDI ports, loopMIDI, or DAW required.
 ### Install dependencies
 
 ```bash
-pip install pedalboard mido numpy sounddevice soundfile
+pip install -r requirements-test.txt     # pedalboard, mido, numpy (pinned)
+pip install sounddevice soundfile        # optional: --play and --save
 ```
 
 ### Run all tests
@@ -381,8 +394,10 @@ audio_bright = plugin.process(msgs, 2.5, SR, reset=True)
 | `icon.png` | Application / plugin icon |
 | `test_midi.py` | Automated Python test suite |
 | `pyproject.toml` | Ruff lint configuration |
-| `.github/workflows/build.yml` | CI — CMake build on Ubuntu |
+| `.github/workflows/test.yml` | CI on every PR — Windows build, unit tests, Python suite, pluginval (strictness 5), CPU benchmark |
+| `.github/workflows/build.yml` | CI — CMake build and unit tests on Ubuntu (GCC) |
 | `.github/workflows/lint.yml` | CI — Python ruff lint |
-| `.github/workflows/release.yml` | CI — builds installer and publishes GitHub Release on tag push |
+| `.github/workflows/release.yml` | Release on a version tag — all tests, pluginval (strictness 10), installer, GitHub Release |
+| `requirements-test.txt` | Pinned Python dependencies for `test_midi.py` |
 | `installer.nsi` | NSIS installer script (VST3 + Standalone) |
 | `LICENSE` | MIT licence |
