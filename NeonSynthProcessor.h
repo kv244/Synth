@@ -83,6 +83,7 @@ public:
         std::atomic<float> frequencyHz { 0.0f };
         std::atomic<float> secondsSinceOn { 0.0f };
         std::atomic<float> secondsSinceOff { -1.0f };
+        std::atomic<float> samplePosition { -1.0f };   // 0..1 while playing the sample, else -1
     };
 
     const std::array<VoiceView, numVoices>& getVoiceViews() const noexcept { return voiceViews; }
@@ -129,6 +130,8 @@ public:
         juce::String problem;    ///< why the last load failed, or "sample missing: <name>"; empty when fine
         bool loading = false;    ///< a background load is in progress
         double seconds = 0.0;
+        double sampleRate = 0.0; ///< the file's own sample rate (playback converts to the host's)
+        juce::String path;       ///< full path of the file; empty for the built-in pad
     };
 
     /**
@@ -214,6 +217,14 @@ private:
     juce::AudioParameterFloat*  seqSwingParameter      = nullptr;
     juce::AudioParameterFloat*  seqGateParameter       = nullptr;
     juce::AudioParameterChoice* seqModeParameter       = nullptr;
+
+    juce::AudioParameterChoice* sourceParameter        = nullptr;
+    juce::AudioParameterInt*    smpRootParameter       = nullptr;
+    juce::AudioParameterFloat*  smpStartParameter      = nullptr;
+    juce::AudioParameterChoice* smpLoopParameter       = nullptr;
+    juce::AudioParameterFloat*  smpLoopStartParameter  = nullptr;
+    juce::AudioParameterFloat*  smpLoopEndParameter    = nullptr;
+    juce::AudioParameterFloat*  smpXfadeParameter      = nullptr;
 
     juce::SmoothedValue<float> outputGain { 1.0f };
 

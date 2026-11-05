@@ -10,6 +10,7 @@
       idle      - no notes
       one note  - a single held note
       16 voices - 16 notes held at full velocity (soft clipper working hard)
+      sample 16 - the same 16 notes playing the built-in pad (Source = Sample, looped)
       dense     - sequencer at 1/32 and 240 BPM plus an 8-note chord every 250 ms
 
     Build with CMake:  cmake -B build -DJUCE_DIR=... -DNEONSYNTH_BUILD_TESTS=ON
@@ -92,6 +93,8 @@ int main()
     report ("idle",     render ([] (juce::MidiBuffer&, juce::int64) {}, noChange));
     report ("one note", render (held ({ 60 }, 100), noChange));
     report ("16 voices", render (held ({ 48, 50, 52, 53, 55, 57, 59, 60, 62, 64, 65, 67, 69, 71, 72, 74 }, 127), noChange));
+    report ("sample 16", render (held ({ 48, 50, 52, 53, 55, 57, 59, 60, 62, 64, 65, 67, 69, 71, 72, 74 }, 127),
+                                 [] (juce::AudioProcessor& p) { setParameter (p, "source", 1.0f); }));   // the built-in pad, looped
 
     const auto dense = [] (juce::MidiBuffer& midi, juce::int64 blockStart)
     {

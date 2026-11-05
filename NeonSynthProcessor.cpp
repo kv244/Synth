@@ -98,6 +98,22 @@ juce::AudioProcessorValueTreeState::ParameterLayout NeonSynthProcessor::createPa
                                                          NormalisableRange<float> (0.05f, 1.0f), 0.5f));
     layout.add (std::make_unique<AudioParameterChoice> (ParameterID { "seqMode", 1 }, "Sequencer Mode",
                                                          StringArray { "Layer", "Replace", "Transpose" }, 0));        // order matches SequencerMode
+
+    // Sound source (v1.5.0). A separate parameter rather than more Waveform choices: adding
+    // items to Waveform would move its existing choices' normalised values and break
+    // automation recorded with v1.4. New parameters go at the end so old sessions map cleanly.
+    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { "source", 1 }, "Source",
+                                                         StringArray { "Oscillator", "Sample", "Granular" }, 0));     // order matches NeonSynthVoice::Source
+
+    // Sample playback; positions are fractions of the sample's length.
+    layout.add (std::make_unique<AudioParameterInt>    (ParameterID { "smpRoot", 1 }, "Sample Root", 0, 127, 60));   // MIDI note the file plays at its own pitch
+    layout.add (std::make_unique<AudioParameterFloat>  (ParameterID { "smpStart", 1 }, "Sample Start", 0.0f, 1.0f, 0.0f));
+    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { "smpLoop", 1 }, "Sample Loop",
+                                                         StringArray { "One-shot", "Loop", "Loop until release" }, 1));  // order matches SampleReader::LoopMode
+    layout.add (std::make_unique<AudioParameterFloat>  (ParameterID { "smpLoopStart", 1 }, "Sample Loop Start", 0.0f, 1.0f, 0.0f));
+    layout.add (std::make_unique<AudioParameterFloat>  (ParameterID { "smpLoopEnd", 1 }, "Sample Loop End", 0.0f, 1.0f, 1.0f));
+    layout.add (std::make_unique<AudioParameterFloat>  (ParameterID { "smpXfade", 1 }, "Sample Crossfade",
+                                                         NormalisableRange<float> (5.0f, 50.0f, 0.1f), 10.0f));       // milliseconds
     return layout;
 }
 
@@ -133,6 +149,13 @@ NeonSynthProcessor::NeonSynthProcessor()
     seqSwingParameter      = getTypedParameter<juce::AudioParameterFloat>  (apvts, "seqSwing");
     seqGateParameter       = getTypedParameter<juce::AudioParameterFloat>  (apvts, "seqGate");
     seqModeParameter       = getTypedParameter<juce::AudioParameterChoice> (apvts, "seqMode");
+    sourceParameter        = getTypedParameter<juce::AudioParameterChoice> (apvts, "source");
+    smpRootParameter       = getTypedParameter<juce::AudioParameterInt>    (apvts, "smpRoot");
+    smpStartParameter      = getTypedParameter<juce::AudioParameterFloat>  (apvts, "smpStart");
+    smpLoopParameter       = getTypedParameter<juce::AudioParameterChoice> (apvts, "smpLoop");
+    smpLoopStartParameter  = getTypedParameter<juce::AudioParameterFloat>  (apvts, "smpLoopStart");
+    smpLoopEndParameter    = getTypedParameter<juce::AudioParameterFloat>  (apvts, "smpLoopEnd");
+    smpXfadeParameter      = getTypedParameter<juce::AudioParameterFloat>  (apvts, "smpXfade");
 
     loadDefaultPattern();
     publishSample (SampleLoader::makeDefaultSample());
@@ -190,6 +213,11 @@ void NeonSynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
     params.adsr     = { attackParameter->get(), decayParameter->get(),
                         sustainParameter->get(), releaseParameter->get() };
 
+    params.source = (NeonSynthVoice::Source) sourceParameter->getIndex();
+    params.sample = blockSample;
+    params.sampleSettings = { smpRootParameter->get(), smpStartParameter->get(), smpLoopParameter->getIndex(),
+                              smpLoopStartParameter->get(), smpLoopEndParameter->get(), smpXfadeParameter->get() * 0.001f };
+
     // Every voice shares the same settings. TODO: per-voice detune for unison, or extra harmonics.
     for (auto* v : voices)
         v->setParameters (params);
@@ -244,6 +272,7 @@ void NeonSynthProcessor::publishVoiceViews() noexcept
         v.frequencyHz    .store (t.frequencyHz,     std::memory_order_relaxed);
         v.secondsSinceOn .store (t.secondsSinceOn,  std::memory_order_relaxed);
         v.secondsSinceOff.store (t.secondsSinceOff, std::memory_order_relaxed);
+        v.samplePosition .store (t.samplePosition,  std::memory_order_relaxed);
     }
 }
 
@@ -526,7 +555,9 @@ NeonSynthProcessor::SampleStatus NeonSynthProcessor::getSampleStatus() const
         if (sample != nullptr)
         {
             status.name    = sample->getOrigin().name;
-            status.seconds = sample->getLengthSeconds();
+            status.seconds    = sample->getLengthSeconds();
+            status.sampleRate = sample->getSampleRate();
+            status.path       = sample->getOrigin().path;
         }
     });
 
