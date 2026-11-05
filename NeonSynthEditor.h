@@ -80,8 +80,8 @@ public:
             (apvts, "waveform", waveformCombo);
 
         addAndMakeVisible (sourceCombo);
-        sourceCombo.addItemList ({ "Oscillator", "Sample", "Granular" }, 1);   // same order as the parameter
-        sourceCombo.setTooltip ("What the voices play: the oscillator (Waveform), the loaded sample, or grains of it");
+        sourceCombo.addItemList ({ "Oscillator", "Sample", "Granular", "Random" }, 1);   // same order as the parameter
+        sourceCombo.setTooltip ("What the voices play: the oscillator (Waveform), the loaded sample, grains of it, or Random: a pitched wave of 16 random steps that keeps evolving");
         for (auto id : { juce::ComboBox::outlineColourId, juce::ComboBox::textColourId, juce::ComboBox::arrowColourId })
             sourceCombo.setColour (id, neon::cyan);
         sourceAttachment = std::make_unique<ComboBoxAttachment> (apvts, "source", sourceCombo);

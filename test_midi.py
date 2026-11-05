@@ -607,7 +607,7 @@ def test_sample_pitch(plugin):
             load_state_xml(plugin, with_sample_element(original, f'<Sample name="c4.wav" path={quoteattr(wav)}/>'))
 
         set_params(plugin, filter_on=False)
-        plugin.parameters["source"].raw_value = 0.5                     # Oscillator / Sample / Granular
+        plugin.parameters["source"].raw_value = 1 / 3                   # Oscillator / Sample / Granular / Random
         plugin.parameters["sample_root"].raw_value = 60 / 127
         plugin.parameters["sample_loop"].raw_value = 0.5                # Loop
         found = {}
@@ -628,6 +628,39 @@ def test_sample_pitch(plugin):
     return "  ".join(f"{n}: {f:.1f} Hz" for n, f in found.items()) + "  one-shot ends"
 
 
+def test_random(plugin):
+    """Source = Random plays a pitched wave of random steps that repeats exactly after a reset.
+
+    C4 on the Random source must be audible, must repeat itself one period
+    (1 / 261.63 Hz) later far more than half a step off it, which is what
+    makes it pitched rather than noise, and two renders of the same MIDI
+    (after a reset) must be identical: the steps are random but seeded."""
+    saved = {name: p.raw_value for name, p in plugin.parameters.items()}
+    try:
+        set_params(plugin, filter_on=False)
+        plugin.parameters["source"].raw_value = 1.0                     # Random
+        msgs = [mido.Message("note_on", note=60, velocity=100, time=0.0)]
+        first = plugin.process(msgs, 1.5, SAMPLE_RATE, reset=True)
+        second = plugin.process(msgs, 1.5, SAMPLE_RATE, reset=True)
+        x = first[0, int(0.3 * SAMPLE_RATE):].astype(np.float64)
+        level = rms(first[:, int(0.3 * SAMPLE_RATE):])
+
+        period = SAMPLE_RATE / 261.6256
+        def correlation(lag: int) -> float:
+            return float(np.dot(x[:-lag], x[lag:]) / np.dot(x[:-lag], x[:-lag]))
+        on_period = correlation(round(period))
+        off_period = correlation(round(period + period / 32))           # half a step later
+        assert level > 1e-2, f"Random source is silent (RMS {level:.5f})"
+        assert on_period > 0.8 and on_period > off_period + 0.25, \
+            f"Random is not pitched: correlation {on_period:.2f} one period later, {off_period:.2f} half a step off"
+        difference = float(np.max(np.abs(first - second)))
+        assert difference == 0.0, f"two renders of the same MIDI differ by up to {difference:.3g}: Random is not seeded"
+    finally:
+        for name, value in saved.items():
+            plugin.parameters[name].raw_value = value
+    return f"RMS {level:.3f}  correlation {on_period:.2f} at one period, {off_period:.2f} off it  repeat renders identical"
+
+
 def test_granular(plugin):
     """Source = Granular plays a cloud of grains, pitched by the key, and repeats exactly.
 
@@ -645,7 +678,7 @@ def test_granular(plugin):
             load_state_xml(plugin, with_sample_element(original, f'<Sample name="c4.wav" path={quoteattr(wav)}/>'))
 
         set_params(plugin, filter_on=False)
-        plugin.parameters["source"].raw_value = 1.0                     # Granular
+        plugin.parameters["source"].raw_value = 2 / 3                   # Granular
         plugin.parameters["sample_root"].raw_value = 60 / 127
         plugin.parameters[find_param(plugin, "grain", "spray")].raw_value = 0.3
         plugin.parameters[find_param(plugin, "grain", "jitter")].raw_value = 0.2   # 20 cents
@@ -787,6 +820,7 @@ TESTS = [
     ("Sample state",      test_sample_state),
     ("Sample pitch",      test_sample_pitch),
     ("Granular",          test_granular),
+    ("Random",            test_random),
     ("Channel 16 key",    test_keyboard_on_sequencer_channel),
     ("Log per instance",  test_midi_log_per_instance),
 ]

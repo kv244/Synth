@@ -103,7 +103,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout NeonSynthProcessor::createPa
     // items to Waveform would move its existing choices' normalised values and break
     // automation recorded with v1.4. New parameters go at the end so old sessions map cleanly.
     layout.add (std::make_unique<AudioParameterChoice> (ParameterID { "source", 1 }, "Source",
-                                                         StringArray { "Oscillator", "Sample", "Granular" }, 0));     // order matches NeonSynthVoice::Source
+                                                         StringArray { "Oscillator", "Sample", "Granular", "Random" }, 0));   // order matches NeonSynthVoice::Source
 
     // Sample playback; positions are fractions of the sample's length.
     layout.add (std::make_unique<AudioParameterInt>    (ParameterID { "smpRoot", 1 }, "Sample Root", 0, 127, 60));   // MIDI note the file plays at its own pitch

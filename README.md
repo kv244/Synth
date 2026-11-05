@@ -14,6 +14,7 @@ by **Razvan Julian Petrescu** / **AudioDSP**.
 ## Features
 
 - **4 Waveforms** — Sine, Square, Triangle, Sawtooth
+- **Random** — a pitched wave of 16 random steps per cycle; one step is re-rolled about every cycle, so it keeps its pitch while its timbre drifts (the whole shape is renewed every 17 cycles). Band-limited and seeded, so the same MIDI renders the same audio
 - **Granular** — a cloud of up to 32 short grains per voice from the same sample: position, scan (moving through the file at up to ±2× its speed, or frozen), grain size, density, spray and pitch jitter; seeded, so the same MIDI renders the same audio
 - **Sample playback** — load a WAV, AIFF or FLAC file (or drop it on the window) and play it across the keyboard: root note, start point, One-shot / Loop / Loop until release with a crossfaded loop, and band-limited copies so high notes don't alias. A built-in pad plays until you load a file, and the sample is saved inside the session
 - **Low-pass Filter** — adjustable cutoff (20 Hz – 20 kHz) with on/off bypass toggle
@@ -118,7 +119,7 @@ the **AudioDSP** manufacturer in your DAW's instrument browser.
 
 | Control | Colour | Description |
 |---|---|---|
-| Source | Cyan | What the voices play — Oscillator (the Waveform below), Sample, or Granular (grains of the sample) |
+| Source | Cyan | What the voices play — Oscillator (the Waveform below), Sample, Granular (grains of the sample), or Random (a pitched, evolving wave of 16 random steps) |
 | Waveform | Cyan | Oscillator shape — Sine / Square / Triangle / Sawtooth (dimmed when Source isn't Oscillator) |
 | LOAD / PAD | Cyan | Load a WAV, AIFF or FLAC file (or drop one anywhere on the window); PAD returns to the built-in pad. The file name, its length and its sample rate (for example `pad.wav  2.5 s  44.1 kHz`) and any loading problem are shown beside them; a long name is shortened, and the tooltip shows the full path |
 | Loop mode | Cyan | One-shot plays to the end; Loop loops while the note sounds (release included); Loop until release loops while the key is held, then plays on to the end |
@@ -183,11 +184,11 @@ ctest --test-dir build -C Release --output-on-failure
 |---|---|
 | `StepSequencerTests` | Sequencer timing, gate, swing, rates, block-size independence, stop and loop handling, tolerance of small transport drift, triggers disabled, retriggering, step packing (15 checks) |
 | `VoiceEnvelopeTests` | The voice envelope: identical to `juce::ADSR` with fixed settings, releases that survive parameter updates, sustain slew, retriggering, release-time changes (6 checks) |
-| `OscillatorTests` | The oscillator: pitch and DC offset of every waveform, level at high pitch, band-limited saw step, waveform changes waiting for the cycle boundary, phase kept across pitch changes (16 checks) |
+| `OscillatorTests` | The oscillators: pitch and DC offset of every waveform, level at high pitch, band-limited saw step, waveform changes waiting for the cycle boundary, phase kept across pitch changes; the Random source's repeatability, range, step statistics (one level replaced per cycle), pitch, and band-limited steps (27 checks) |
 | `SampleDataTests` | The sample: mono mix, −1 dBFS normalisation, 24-bit grid, 60 s cap, decimated copies (pitch kept, aliasing removed), exact FLAC round trip, file loading, the built-in pad, and the lock-free hand-off freeing replaced samples only when safe, including 2000 swaps under load (39 checks) |
 | `SampleReaderTests` | Sample playback: pitch tracking (and across sample rates), which band-limited copy each pitch reads, no aliasing at +24 semitones, steady level through crossfaded loops, smooth off-cycle loops, One-shot ends, Loop until release, start offset, the sample reference count (23 checks) |
 | `GranularTests` | The granular source: bit-identical renders from the same seed, grain counts at 5 / 50 / 200 per second, steady level across size and density, pitch, the 32-grain cap, scan speed and freeze, retrigger without cutting grains, stopping, the sample reference |
-| `RealtimeSafetyTests` | Hooks `operator new`/`delete` and fails if `processBlock` allocates or frees while rendering chords, the sequencer and every waveform as another thread keeps replacing the sample |
+| `RealtimeSafetyTests` | Hooks `operator new`/`delete` and fails if `processBlock` allocates or frees while rendering chords, the sequencer, every waveform and every source as another thread keeps replacing the sample |
 | `RenderBenchmark` | Times `processBlock` directly (no host) for idle, one note, 16 voices and a dense sequencer + chords load |
 
 ### Performance
@@ -333,6 +334,7 @@ a fixed 120 BPM tempo, with real time preserved via tick timing.
 | Sustain change | Changing Sustain while a note is held ramps the level instead of clicking |
 | State round trip | The pattern is saved and restored; a state without a pattern loads the default |
 | Granular | With Source = Granular and a C4 sine loaded, C5 peaks at 523 Hz, and two renders of the same MIDI are identical |
+| Random | With Source = Random, C4 repeats itself one period later (pitched, not noise), and two renders of the same MIDI are identical |
 | Sample pitch | With Source = Sample and a C4 sine loaded, C3 / C4 / C5 sound at 130.8 / 261.6 / 523.3 Hz; One-shot goes silent when the file ends |
 | Sample state | A file named in the state loads and is embedded as FLAC; another instance restores it from the embedded copy after the file is deleted; a missing sample keeps its reference; a v1.4 state loads the built-in pad |
 | Channel 16 key | A keyboard note on channel 16 survives the sequencer playing the same pitch |
@@ -401,7 +403,7 @@ audio_bright = plugin.process(msgs, 2.5, SR, reset=True)
 | File | Purpose |
 |---|---|
 | `NeonSynthVoice.h` | Voice and sound classes — sound source, filter, envelope, pan |
-| `Oscillator.h` | The band-limited oscillator (sine, square, triangle, sawtooth with PolyBLEP) |
+| `Oscillator.h` | The band-limited oscillators: sine, square, triangle, sawtooth with PolyBLEP, and the Random source's step wave |
 | `SampleData.h` | A prepared sample: mono, normalised, 24-bit grid, with 1/2- and 1/4-rate copies |
 | `SampleSlot.h` | Lock-free hand-off of the current sample to the audio thread; frees replaced samples only when safe |
 | `SampleLoader.h` | Loads WAV, AIFF and FLAC files and embedded FLAC; renders the built-in pad |
@@ -417,7 +419,7 @@ audio_bright = plugin.process(msgs, 2.5, SR, reset=True)
 | `VoiceEnvelope.h` | The voice's ADSR envelope (slewed sustain, release rate fixed at note-off) |
 | `tests/StepSequencerTests.cpp` | Unit tests for the sequencer engine (`-DNEONSYNTH_BUILD_TESTS=ON`) |
 | `tests/VoiceEnvelopeTests.cpp` | Unit tests for the voice envelope |
-| `tests/OscillatorTests.cpp` | Unit tests for the oscillator |
+| `tests/OscillatorTests.cpp` | Unit tests for the oscillators, including Random |
 | `tests/SampleDataTests.cpp` | Unit tests for the sample, its loader and the hand-off |
 | `tests/SampleReaderTests.cpp` | Unit tests for sample playback |
 | `tests/GranularTests.cpp` | Unit tests for the granular source |

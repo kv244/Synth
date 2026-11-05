@@ -193,7 +193,7 @@ int main()
         if (b % 200 == 0)
             setParameter (processor, "waveform", (float) ((b / 200) % 4));   // Sine, Square, Triangle, Sawtooth
         if (b % 300 == 0)
-            setParameter (processor, "source", (float) ((b / 300) % 3));     // Oscillator, Sample, Granular
+            setParameter (processor, "source", (float) ((b / 300) % 4));     // Oscillator, Sample, Granular, Random
         if (b % 450 == 0)
             setParameter (processor, "smpLoop", (float) ((b / 450) % 3));    // One-shot, Loop, Loop until release
 

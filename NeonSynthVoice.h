@@ -20,8 +20,8 @@ public:
     One synth voice: sound source -> ADSR (VoiceEnvelope) -> TPT low-pass -> pan.
 
     The source is chosen per note (see Source): the band-limited oscillator
-    (Oscillator.h), the loaded sample (SampleReader.h) or grains of it
-    (GrainCloud.h). Sources plug in at nextSourceSample(), so nothing after
+    or the Random step wave (Oscillator.h), the loaded sample
+    (SampleReader.h) or grains of it (GrainCloud.h). Sources plug in at nextSourceSample(), so nothing after
     it changes. A voice retriggered or stolen while playing the sample
     crossfades from its old read position to the new one over 2 ms; grains
     already sounding always play out, so a granular voice never clicks
@@ -40,7 +40,7 @@ class NeonSynthVoice : public juce::SynthesiserVoice
 {
 public:
     /** Where a note's sound comes from (the Source parameter's order). */
-    enum class Source { oscillator = 0, sample = 1, granular = 2 };
+    enum class Source { oscillator = 0, sample = 1, granular = 2, random = 3 };
 
     /** Parameter snapshot, read once per block on the audio thread. */
     struct Params
@@ -101,7 +101,7 @@ public:
         fadingReader.end();
         fadingSamplesLeft = 0;
         cloud.end();
-        noteCounter = 0;
+        resetSeeds();
 
         sampleRate = newSampleRate;
         adsr.setSampleRate (newSampleRate);
@@ -152,6 +152,7 @@ public:
         // Set the pitch directly: no glide from the previous note.
         frequencyHz     = (float) juce::MidiMessage::getMidiNoteInHertz (midiNote);
         oscillator.setFrequency (frequencyHz, sampleRate);
+        randomOscillator.setFrequency (frequencyHz, sampleRate);
         startSource (midiNote);
         samplesSinceOn  = 0;
         samplesSinceOff = -1;
@@ -336,7 +337,7 @@ private:
     void startSource (int midiNote) noexcept
     {
         auto newSource = pendingSource;
-        if (blockSample == nullptr)
+        if (blockSample == nullptr && (newSource == Source::sample || newSource == Source::granular))
             newSource = Source::oscillator;
 
         // Retrigger or steal while the sample sounds: fade the old read position out over
@@ -384,6 +385,7 @@ private:
     {
         float out = source == Source::oscillator ? oscillator.nextSample()
                   : source == Source::sample     ? reader.nextSample()
+                  : source == Source::random     ? randomOscillator.nextSample()
                                                  : 0.0f;
 
         if (cloudSounds)
@@ -405,6 +407,7 @@ private:
     double sampleRate = 44100.0;
     Source source = Source::oscillator, pendingSource = Source::oscillator;
     PolyBlepOscillator oscillator;
+    RandomStepOscillator randomOscillator;   // the Random source
 
     // Sample source
     const SampleData* blockSample = nullptr;   // this block's sample, from setParameters()
@@ -420,11 +423,15 @@ private:
     int voiceIndex = 0, noteCounter = 0;   // seed the grains, so the same MIDI renders the same audio
 
 public:
-    /** Which voice this is (0..15), for seeding the grains. Set once by the processor. */
-    void setVoiceIndex (int index) noexcept   { voiceIndex = index; }
+    /** Which voice this is (0..15), for seeding the grains and the Random source. Set once by the processor. */
+    void setVoiceIndex (int index) noexcept   { voiceIndex = index; resetSeeds(); }
 
-    /** Restarts the grain seeds (the processor's reset()), so a render can be repeated exactly. */
-    void resetSeeds() noexcept                { noteCounter = 0; }
+    /** Restarts the grain seeds and the Random source (the processor's reset()), so a render can be repeated exactly. */
+    void resetSeeds() noexcept
+    {
+        noteCounter = 0;
+        randomOscillator.reseed ((juce::uint32) (voiceIndex + 1) * 2654435761u);
+    }
 
 private:
     bool   hardStopping = false;

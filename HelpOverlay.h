@@ -126,7 +126,7 @@ private:
 
         // Right column: the synth and getting sound out.
         addSection (columns[1], { "SOUND", {
-            "SOURCE: the oscillator (with its Waveform), the loaded sample, or Granular: a cloud of short grains of it.",
+            "SOURCE: the oscillator (its Waveform), Random (16 drifting steps), the sample, or Granular: grains of it.",
             "ENVELOPE: attack, decay, sustain and release of every note.",
             "FILTER: low-pass cutoff; ON switches it in.",
             "GAIN: output level. WIDTH: stereo spread of the voices.",
