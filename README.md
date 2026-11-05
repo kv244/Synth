@@ -119,7 +119,7 @@ the **AudioDSP** manufacturer in your DAW's instrument browser.
 |---|---|---|
 | Source | Cyan | What the voices play — Oscillator (the Waveform below) or Sample (Granular arrives with the next phase and plays as Sample until then) |
 | Waveform | Cyan | Oscillator shape — Sine / Square / Triangle / Sawtooth (dimmed when Source isn't Oscillator) |
-| LOAD / PAD | Cyan | Load a WAV, AIFF or FLAC file (or drop one anywhere on the window); PAD returns to the built-in pad. The file name, length and any loading problem are shown beside them |
+| LOAD / PAD | Cyan | Load a WAV, AIFF or FLAC file (or drop one anywhere on the window); PAD returns to the built-in pad. The file name, its length and its sample rate (for example `pad.wav  2.5 s  44.1 kHz`) and any loading problem are shown beside them; a long name is shortened, and the tooltip shows the full path |
 | Loop mode | Cyan | One-shot plays to the end; Loop loops while the note sounds (release included); Loop until release loops while the key is held, then plays on to the end |
 | Sample view | Cyan | The waveform with the start (cyan line), the loop (amber brackets) and a white playhead per sounding voice; drag a marker to move it, click to set the start |
 | ROOT / START / L.START / L.END / XFADE | Cyan | Root key (plays the file at its own pitch), start point, loop start and end, and the loop crossfade (5–50 ms) |

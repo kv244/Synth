@@ -555,7 +555,9 @@ NeonSynthProcessor::SampleStatus NeonSynthProcessor::getSampleStatus() const
         if (sample != nullptr)
         {
             status.name    = sample->getOrigin().name;
-            status.seconds = sample->getLengthSeconds();
+            status.seconds    = sample->getLengthSeconds();
+            status.sampleRate = sample->getSampleRate();
+            status.path       = sample->getOrigin().path;
         }
     });
 

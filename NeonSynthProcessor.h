@@ -130,6 +130,8 @@ public:
         juce::String problem;    ///< why the last load failed, or "sample missing: <name>"; empty when fine
         bool loading = false;    ///< a background load is in progress
         double seconds = 0.0;
+        double sampleRate = 0.0; ///< the file's own sample rate (playback converts to the host's)
+        juce::String path;       ///< full path of the file; empty for the built-in pad
     };
 
     /**

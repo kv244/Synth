@@ -83,6 +83,7 @@ public:
         // ── Sample ───────────────────────────────────────────────────────────
         addAndMakeVisible (sampleView);
         setUpReadout (sampleNameLabel, neon::cyan, juce::Justification::centredLeft);
+        sampleNameLabel.setInterceptsMouseClicks (true, false);   // so its tooltip (the full path) shows
         setUpReadout (sampleStatusLabel, neon::red, juce::Justification::centredRight);
 
         for (auto* button : { &loadButton, &padButton })
@@ -448,6 +449,37 @@ private:
 
     static int sampleKnobX (int i) noexcept   { return 430 + 62 * i; }
 
+    /** name + details, with the name shortened ("...") so the details always fit the label. */
+    juce::String fitSampleName (const juce::String& name, const juce::String& details) const
+    {
+        const auto font = sampleNameLabel.getFont();
+        const auto width = [&font] (const juce::String& text)
+        {
+            juce::GlyphArrangement glyphs;
+            glyphs.addLineOfText (font, text, 0.0f, 0.0f);
+            return glyphs.getBoundingBox (0, -1, true).getWidth();
+        };
+
+        const float available = (float) sampleNameLabel.getWidth() - 4.0f;
+        if (width (name + details) <= available)
+            return name + details;
+
+        auto shortened = name;
+        while (shortened.length() > 1 && width (shortened + "..." + details) > available)
+            shortened = shortened.dropLastCharacters (1);
+        return shortened.trimEnd() + "..." + details;
+    }
+
+    /** 48000 -> "48 kHz", 44100 -> "44.1 kHz", 22050 -> "22.05 kHz". */
+    static juce::String formatSampleRate (double rate)
+    {
+        if (rate <= 0.0)
+            return {};
+        const auto hz = juce::roundToInt (rate);
+        const int decimals = hz % 1000 == 0 ? 0 : (hz % 100 == 0 ? 1 : 2);
+        return juce::String (hz / 1000.0, decimals) + " kHz";
+    }
+
     //==========================================================================
     // Sample files
 
@@ -549,7 +581,15 @@ private:
         set (smpXfadeReadout,     juce::String (juce::roundToInt (smpXfadeValue->load())) + " ms");
 
         const auto status = processor.getSampleStatus();
-        set (sampleNameLabel,   status.name + juce::String::formatted ("  %.1f s", status.seconds));
+        // Re-fitted only when the text or the label's size changes (it measures glyphs).
+        const auto details = "  " + juce::String (status.seconds, 1) + " s  " + formatSampleRate (status.sampleRate);
+        if (status.name + details != fittedFor || sampleNameLabel.getWidth() != fittedWidth)
+        {
+            fittedFor   = status.name + details;
+            fittedWidth = sampleNameLabel.getWidth();
+            set (sampleNameLabel, fitSampleName (status.name, details));
+        }
+        sampleNameLabel.setTooltip (status.path.isNotEmpty() ? status.path : status.name);
         set (sampleStatusLabel, status.loading ? juce::String ("loading...") : status.problem);
     }
 
@@ -642,6 +682,8 @@ private:
     juce::Label      smpRootReadout, smpStartReadout, smpLoopStartReadout, smpLoopEndReadout, smpXfadeReadout;
     std::array<std::unique_ptr<SliderAttachment>, 5> sampleKnobAttachments;
     std::unique_ptr<juce::FileChooser> chooser;
+    juce::String fittedFor;      // the sample label's last unshortened text, and the width it was fitted to
+    int fittedWidth = -1;
 
     // Step sequencer
     StepGrid           stepGrid;
