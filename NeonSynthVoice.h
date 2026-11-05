@@ -213,6 +213,33 @@ public:
     void controllerMoved (int, int) override {}
 
     using SynthesiserVoice::renderNextBlock;   // keep the double-precision overload visible
+
+    /**
+        Renders the voice one sample at a time, in one fused loop, in one of
+        two versions:
+
+          steady   nothing is gliding (velocity level, cutoff, filter on/off
+                   mix and pan all at rest - almost always the case): their
+                   values are read once and every "is it smoothing?" branch
+                   is out of the loop;
+          gliding  any of them is moving: each is advanced per sample.
+
+        A smoother at rest stays at rest for the whole call (targets only
+        change between calls), so the choice holds for the block. Both versions
+        do the same operations in the same order, so the output is
+        bit-identical to the single loop this replaced, and whichever runs.
+
+        Why not render stage by stage (whole buffers through the oscillator,
+        then the envelope, then the filter...) so the compiler can vectorise
+        the simple stages? That was tried, and measured 37% slower: the
+        oscillator phase, the envelope and the filter state are three
+        independent chains where each sample depends on the one before, and
+        in one fused loop the CPU overlaps the three chains' latencies. Split
+        into separate passes, each chain's latency is exposed in turn, which
+        costs far more than vectorising the cheap multiplies saves. Making a
+        synth voice faster in earnest means vectorising across voices (several
+        voices' chains side by side in SIMD lanes), not within one.
+    */
     void renderNextBlock (juce::AudioBuffer<float>& output, int startSample, int numSamples) override
     {
         if (! adsr.isActive())
@@ -221,31 +248,51 @@ public:
         auto* left  = output.getWritePointer (0);
         auto* right = output.getNumChannels() > 1 ? output.getWritePointer (1) : nullptr;
 
-        int rendered = 0;
-
         // The grain cloud renders the whole stretch up front (block-wise is several times
         // cheaper than per sample); the loop below reads it like any other source.
         const bool cloudSounds = cloud.isActive();
         if (cloudSounds)
             renderCloud (numSamples);
 
+        const bool steady = ! level.isSmoothing() && ! cutoff.isSmoothing() && ! filterMix.isSmoothing() && ! pan.isSmoothing();
+        const int rendered = steady ? renderSamples<true>  (left, right, startSample, numSamples, cloudSounds)
+                                    : renderSamples<false> (left, right, startSample, numSamples, cloudSounds);
+
+        samplesSinceOn += rendered;
+        if (samplesSinceOff >= 0)
+            samplesSinceOff += rendered;
+    }
+
+private:
+    /** The render loop (see renderNextBlock()); returns how many samples it rendered. */
+    template <bool steady>
+    int renderSamples (float* left, float* right, int startSample, int numSamples, bool cloudSounds) noexcept
+    {
+        // Steady: the values that would otherwise be advanced every sample, read once.
+        // (getNextValue() of a smoother at rest just returns its value.)
+        const float steadyLevel = level.getNextValue(), steadyMix = filterMix.getNextValue();
+        const float steadyLeft = gainLeft, steadyRight = gainRight;
+
+        int rendered = 0;
         for (int i = startSample; i < startSample + numSamples; ++i, ++rendered)
         {
-            if (cutoff.isSmoothing())
-                filter.setCutoffFrequency (cutoff.getNextValue());
+            if constexpr (! steady)
+                if (cutoff.isSmoothing())
+                    filter.setCutoffFrequency (cutoff.getNextValue());
 
             lastEnvelope    = adsr.getNextSample();
-            const float dry = nextSourceSample (rendered, cloudSounds) * level.getNextValue() * lastEnvelope;
+            const float dry = nextSourceSample (cloudSounds) * (steady ? steadyLevel : level.getNextValue()) * lastEnvelope;
             const float wet = filter.processSample (0, dry);   // always run: state stays warm
-            const float out = dry + filterMix.getNextValue() * (wet - dry);
+            const float out = dry + (steady ? steadyMix : filterMix.getNextValue()) * (wet - dry);
 
-            if (pan.isSmoothing())
-                updatePanGains (pan.getNextValue());
+            if constexpr (! steady)
+                if (pan.isSmoothing())
+                    updatePanGains (pan.getNextValue());
 
             if (right != nullptr)
             {
-                left[i]  += out * gainLeft;
-                right[i] += out * gainRight;
+                left[i]  += out * (steady ? steadyLeft  : gainLeft);
+                right[i] += out * (steady ? steadyRight : gainRight);
             }
             else
             {
@@ -269,13 +316,9 @@ public:
             if (source == Source::sample && reader.hasFinished() && ! hardStopping)
                 stopNote (0.0f, false);
         }
-
-        samplesSinceOn += rendered;
-        if (samplesSinceOff >= 0)
-            samplesSinceOff += rendered;
+        return rendered;
     }
 
-private:
     /** Constant-power pan law, scaled so the centre is unity gain on both sides. */
     void updatePanGains (float p) noexcept
     {
@@ -336,8 +379,8 @@ private:
             cloud.end();
     }
 
-    /** The current note's sound source, sample `i` of this stretch. */
-    float nextSourceSample (int i, bool cloudSounds) noexcept
+    /** The current note's sound source, one sample. */
+    float nextSourceSample (bool cloudSounds) noexcept
     {
         float out = source == Source::oscillator ? oscillator.nextSample()
                   : source == Source::sample     ? reader.nextSample()
@@ -349,7 +392,6 @@ private:
                 renderCloud (cloudSamples);
             out += cloudRead < cloudSamples ? cloudBuffer[(size_t) cloudRead++] : 0.0f;
         }
-        juce::ignoreUnused (i);
 
         if (fadingSamplesLeft > 0)
         {

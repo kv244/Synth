@@ -8,11 +8,25 @@
 #include <array>
 #include <cstring>
 
+// SIMD paths for the grain loop. x86-64 always has SSE2; AVX2 is compiled in too
+// but only used when the CPU reports it (checked once, at run time), so one binary
+// runs everywhere. Other CPUs (ARM) use the scalar loop.
 #if defined (__SSE2__) || defined (_M_X64) || defined (_M_AMD64)
- #include <emmintrin.h>
+ #include <immintrin.h>
  #define NEONSYNTH_GRAINS_SSE2 1
+ #define NEONSYNTH_GRAINS_AVX2 1
+ #if defined (__GNUC__) || defined (__clang__)
+  #define NEONSYNTH_TARGET_AVX2 __attribute__ ((target ("avx2")))   // GCC/Clang: allow AVX2 in this function only
+ #else
+  #define NEONSYNTH_TARGET_AVX2                                     // MSVC allows AVX2 intrinsics anywhere
+ #endif
 #else
  #define NEONSYNTH_GRAINS_SSE2 0
+ #define NEONSYNTH_GRAINS_AVX2 0
+#endif
+
+#ifndef NEONSYNTH_GRAINS_AVX2_GATHER
+ #define NEONSYNTH_GRAINS_AVX2_GATHER 1   // AVX2 reads with vgatherdps (1) or with scalar loads (0)
 #endif
 
 /**
@@ -204,15 +218,18 @@ private:
         A grain's read position is 32.32 fixed point (sample index in the top
         32 bits): stepping it is one integer add, so nothing slow sits on the
         loop-carried path, and its fraction becomes a float by bit
-        manipulation rather than a conversion (see fractionOf). The window phase is a float stepped
-        0 -> 1 over the grain (its end is set by `remaining`, so rounding
-        drift can't lengthen it).
+        manipulation rather than a conversion (see fractionOf). The window phase is age x windowStep,
+        computed afresh for every sample rather than accumulated, so the
+        scalar, SSE2 and AVX2 loops produce bit-identical results whatever
+        order they work through the samples in (an accumulated phase would
+        round differently in each).
     */
     struct Grain
     {
         const float* data = nullptr;   // the copy (level) it reads: grains outlive a retrigger to another pitch
         juce::uint64 position = 0, step = 0;
-        float windowPhase = 0.0f, windowStep = 0.0f;   // 0..1 through the grain
+        int   age = 0;                 // samples rendered so far: the window phase is age x windowStep
+        float windowStep = 0.0f;       // 1 / length
         int   remaining = 0;           // output samples left
         float lengthScale = 1.0f;      // 1 / that copy's length, for display
     };
@@ -231,6 +248,53 @@ private:
         return f - 1.0f;
     }
 
+    //==========================================================================
+    // The grain loop. Three versions of the same arithmetic, picked per call:
+    //
+    //   AVX2   8 samples per step, when the CPU has it (most x86 PCs since 2013)
+    //   SSE2   4 samples per step (every x86-64 CPU)
+    //   scalar 1 sample per step (the last few samples, and non-x86 CPUs)
+    //
+    // Each lane does exactly the scalar loop's operations in the same order, and
+    // there is deliberately no FMA (a fused multiply-add rounds once instead of
+    // twice), so all three render bit-identical audio: the same session sounds
+    // the same on every machine, and the tests can compare the paths directly.
+    //
+    // What makes this loop expensive is not the arithmetic but the four reads
+    // per sample from four different positions; the SIMD versions do the maths
+    // for several samples at once and overlap those reads.
+
+public:
+    enum class SimdPath { automatic, scalar, sse2, avx2 };
+
+    /** Forces one path (tests and benchmarks); automatic picks the best the CPU has. */
+    static void forceSimdPath (SimdPath path) noexcept   { forcedPath().store (path); }
+
+    /** The path render() uses now. */
+    static SimdPath activeSimdPath() noexcept
+    {
+        const auto forced = forcedPath().load();
+        if (forced != SimdPath::automatic)
+            return forced == SimdPath::avx2 && ! cpuHasAVX2() ? SimdPath::sse2 : forced;
+       #if NEONSYNTH_GRAINS_AVX2
+        if (cpuHasAVX2()) return SimdPath::avx2;
+       #endif
+        return NEONSYNTH_GRAINS_SSE2 ? SimdPath::sse2 : SimdPath::scalar;
+    }
+
+    static bool cpuHasAVX2() noexcept
+    {
+        static const bool has = juce::SystemStats::hasAVX2();   // CPUID, read once
+        return has;
+    }
+
+private:
+    static std::atomic<SimdPath>& forcedPath() noexcept
+    {
+        static std::atomic<SimdPath> path { SimdPath::automatic };
+        return path;
+    }
+
     /** Catmull-Rom between x0 and x1, in Horner form. */
     static float cubic (float xm1, float x0, float x1, float x2, float t) noexcept
     {
@@ -240,79 +304,184 @@ private:
         return ((c3 * t + c2) * t + c1) * t + x0;
     }
 
+    /** The window, (4x(1-x))^2, at sample `age` of a grain. */
+    static float windowAt (int age, float windowStep) noexcept
+    {
+        const float x = (float) age * windowStep;
+        const float u = 4.0f * (x - x * x);
+        return u * u;
+    }
+
     /**
         Adds up to `count` samples of the grain to `out`; returns false once it
         has ended. The window is (4x(1-x))^2, a parabola-squared Hann shape
         (within 0.06 of sin^2(pi x), smooth, zero slope at both ends): four
-        multiplies, no table. On x86 four output samples are computed at once
-        with SSE2 (the four reads are still scalar loads); the remainder, and
-        other CPUs, use the scalar loop. Both compute the same formula.
+        multiplies, no table.
     */
     bool renderGrain (Grain& g, float* __restrict out, int count) noexcept
     {
         const int n = juce::jmin (count, g.remaining);
-        const float* __restrict const data = g.data;   // the output never overlaps the sample
-        const juce::uint64 step = g.step;
-        const float dx = g.windowStep;
-        juce::uint64 position = g.position;
-        float x = g.windowPhase;
         int s = 0;
 
-       #if NEONSYNTH_GRAINS_SSE2
+        switch (activeSimdPath())
         {
-            const __m128 half = _mm_set1_ps (0.5f), oneHalf = _mm_set1_ps (1.5f), two = _mm_set1_ps (2.0f),
-                         twoHalf = _mm_set1_ps (2.5f), four = _mm_set1_ps (4.0f), one = _mm_set1_ps (1.0f);
-            const __m128 dx4 = _mm_set1_ps (4.0f * dx);
-            __m128 xs = _mm_setr_ps (x, x + dx, x + 2.0f * dx, x + 3.0f * dx);
-
-            for (; s + 4 <= n; s += 4)
-            {
-                const juce::uint64 p0 = position, p1 = p0 + step, p2 = p1 + step, p3 = p2 + step;
-                const float* d0 = data + (int) (p0 >> 32);
-                const float* d1 = data + (int) (p1 >> 32);
-                const float* d2 = data + (int) (p2 >> 32);
-                const float* d3 = data + (int) (p3 >> 32);
-
-                const __m128 xm1 = _mm_setr_ps (d0[-1], d1[-1], d2[-1], d3[-1]);
-                const __m128 x0  = _mm_setr_ps (d0[0],  d1[0],  d2[0],  d3[0]);
-                const __m128 x1  = _mm_setr_ps (d0[1],  d1[1],  d2[1],  d3[1]);
-                const __m128 x2  = _mm_setr_ps (d0[2],  d1[2],  d2[2],  d3[2]);
-
-                // Fractions from the bits (see fractionOf), four at once.
-                const __m128i bits = _mm_or_si128 (_mm_set1_epi32 (0x3f800000),
-                                                   _mm_setr_epi32 ((int) ((juce::uint32) p0 >> 9), (int) ((juce::uint32) p1 >> 9),
-                                                                   (int) ((juce::uint32) p2 >> 9), (int) ((juce::uint32) p3 >> 9)));
-                const __m128 t = _mm_sub_ps (_mm_castsi128_ps (bits), one);
-
-                const __m128 c1 = _mm_mul_ps (half, _mm_sub_ps (x1, xm1));
-                const __m128 c2 = _mm_sub_ps (_mm_add_ps (_mm_sub_ps (xm1, _mm_mul_ps (twoHalf, x0)), _mm_mul_ps (two, x1)), _mm_mul_ps (half, x2));
-                const __m128 c3 = _mm_add_ps (_mm_mul_ps (half, _mm_sub_ps (x2, xm1)), _mm_mul_ps (oneHalf, _mm_sub_ps (x0, x1)));
-                const __m128 v  = _mm_add_ps (_mm_mul_ps (_mm_add_ps (_mm_mul_ps (_mm_add_ps (_mm_mul_ps (c3, t), c2), t), c1), t), x0);
-
-                const __m128 u = _mm_mul_ps (four, _mm_sub_ps (xs, _mm_mul_ps (xs, xs)));
-                _mm_storeu_ps (out + s, _mm_add_ps (_mm_loadu_ps (out + s), _mm_mul_ps (v, _mm_mul_ps (u, u))));
-
-                position = p3 + step;
-                xs = _mm_add_ps (xs, dx4);
-            }
-            x = _mm_cvtss_f32 (xs);
+           #if NEONSYNTH_GRAINS_AVX2
+            case SimdPath::avx2:  s = renderGrainAVX2 (g, out, n); break;
+           #endif
+           #if NEONSYNTH_GRAINS_SSE2
+            case SimdPath::sse2:  s = renderGrainSSE2 (g, out, n); break;
+           #endif
+            case SimdPath::automatic:
+            case SimdPath::scalar:
+            default:              break;
         }
-       #endif
 
+        // Scalar loop: the samples the SIMD loop left over, or all of them.
+        const float* __restrict const data = g.data;
         for (; s < n; ++s)
         {
-            const float* d = data + (int) (position >> 32);
-            const float u = 4.0f * (x - x * x);
-            out[s] += cubic (d[-1], d[0], d[1], d[2], fractionOf (position)) * (u * u);
-            position += step;
-            x += dx;
+            const float* d = data + (int) (g.position >> 32);
+            out[s] += cubic (d[-1], d[0], d[1], d[2], fractionOf (g.position)) * windowAt (g.age, g.windowStep);
+            g.position += g.step;
+            ++g.age;
         }
 
-        g.position = position;
-        g.windowPhase = x;
         g.remaining -= n;
         return g.remaining > 0;
     }
+
+   #if NEONSYNTH_GRAINS_SSE2
+    /** 4 samples per step; returns how many samples it rendered (a multiple of 4). */
+    static int renderGrainSSE2 (Grain& g, float* __restrict out, int n) noexcept
+    {
+        const float* __restrict const data = g.data;   // the output never overlaps the sample
+        const juce::uint64 step = g.step;
+        juce::uint64 position = g.position;
+
+        const __m128 half = _mm_set1_ps (0.5f), oneHalf = _mm_set1_ps (1.5f), two = _mm_set1_ps (2.0f),
+                     twoHalf = _mm_set1_ps (2.5f), four = _mm_set1_ps (4.0f), one = _mm_set1_ps (1.0f);
+        const __m128 windowStep = _mm_set1_ps (g.windowStep);
+        __m128i ages = _mm_setr_epi32 (g.age, g.age + 1, g.age + 2, g.age + 3);
+        const __m128i ageStep = _mm_set1_epi32 (4);
+
+        int s = 0;
+        for (; s + 4 <= n; s += 4)
+        {
+            const juce::uint64 p0 = position, p1 = p0 + step, p2 = p1 + step, p3 = p2 + step;
+            const float* d0 = data + (int) (p0 >> 32);
+            const float* d1 = data + (int) (p1 >> 32);
+            const float* d2 = data + (int) (p2 >> 32);
+            const float* d3 = data + (int) (p3 >> 32);
+
+            // SSE2 has no gather: the four reads per sample are scalar loads packed into lanes.
+            const __m128 xm1 = _mm_setr_ps (d0[-1], d1[-1], d2[-1], d3[-1]);
+            const __m128 x0  = _mm_setr_ps (d0[0],  d1[0],  d2[0],  d3[0]);
+            const __m128 x1  = _mm_setr_ps (d0[1],  d1[1],  d2[1],  d3[1]);
+            const __m128 x2  = _mm_setr_ps (d0[2],  d1[2],  d2[2],  d3[2]);
+
+            // Fractions from the bits (see fractionOf), four at once.
+            const __m128i bits = _mm_or_si128 (_mm_set1_epi32 (0x3f800000),
+                                               _mm_setr_epi32 ((int) ((juce::uint32) p0 >> 9), (int) ((juce::uint32) p1 >> 9),
+                                                               (int) ((juce::uint32) p2 >> 9), (int) ((juce::uint32) p3 >> 9)));
+            const __m128 t = _mm_sub_ps (_mm_castsi128_ps (bits), one);
+
+            const __m128 c1 = _mm_mul_ps (half, _mm_sub_ps (x1, xm1));
+            const __m128 c2 = _mm_sub_ps (_mm_add_ps (_mm_sub_ps (xm1, _mm_mul_ps (twoHalf, x0)), _mm_mul_ps (two, x1)), _mm_mul_ps (half, x2));
+            const __m128 c3 = _mm_add_ps (_mm_mul_ps (half, _mm_sub_ps (x2, xm1)), _mm_mul_ps (oneHalf, _mm_sub_ps (x0, x1)));
+            const __m128 v  = _mm_add_ps (_mm_mul_ps (_mm_add_ps (_mm_mul_ps (_mm_add_ps (_mm_mul_ps (c3, t), c2), t), c1), t), x0);
+
+            const __m128 x = _mm_mul_ps (_mm_cvtepi32_ps (ages), windowStep);
+            const __m128 u = _mm_mul_ps (four, _mm_sub_ps (x, _mm_mul_ps (x, x)));
+            _mm_storeu_ps (out + s, _mm_add_ps (_mm_loadu_ps (out + s), _mm_mul_ps (v, _mm_mul_ps (u, u))));
+
+            position = p3 + step;
+            ages = _mm_add_epi32 (ages, ageStep);
+        }
+
+        g.position = position;
+        g.age += s;
+        return s;
+    }
+   #endif
+
+   #if NEONSYNTH_GRAINS_AVX2
+    /**
+        8 samples per step; returns how many it rendered (a multiple of 8).
+        The reads use the AVX2 gather instruction (vgatherdps): one instruction
+        fetches the 8 lanes' values from 8 addresses, instead of 8 scalar
+        loads and 7 inserts.
+    */
+    NEONSYNTH_TARGET_AVX2 static int renderGrainAVX2 (Grain& g, float* __restrict out, int n) noexcept
+    {
+        const float* __restrict const data = g.data;
+        const juce::uint64 step = g.step;
+        juce::uint64 position = g.position;
+
+        const __m256 half = _mm256_set1_ps (0.5f), oneHalf = _mm256_set1_ps (1.5f), two = _mm256_set1_ps (2.0f),
+                     twoHalf = _mm256_set1_ps (2.5f), four = _mm256_set1_ps (4.0f), one = _mm256_set1_ps (1.0f);
+        const __m256 windowStep = _mm256_set1_ps (g.windowStep);
+        __m256i ages = _mm256_add_epi32 (_mm256_set1_epi32 (g.age), _mm256_setr_epi32 (0, 1, 2, 3, 4, 5, 6, 7));
+        const __m256i ageStep = _mm256_set1_epi32 (8);
+        const __m256i exponent = _mm256_set1_epi32 (0x3f800000);
+
+        int s = 0;
+        for (; s + 8 <= n; s += 8)
+        {
+            // Sample indices and fraction bits of the 8 positions (32.32 fixed point), packed
+            // straight into registers. (Writing them to a small array and loading that as a
+            // vector stalls: the CPU can't forward eight 4-byte stores into one 32-byte load.)
+            const juce::uint64 p0 = position, p1 = p0 + step, p2 = p1 + step, p3 = p2 + step,
+                               p4 = p3 + step, p5 = p4 + step, p6 = p5 + step, p7 = p6 + step;
+            const __m256i idx = _mm256_setr_epi32 ((int) (p0 >> 32), (int) (p1 >> 32), (int) (p2 >> 32), (int) (p3 >> 32),
+                                                   (int) (p4 >> 32), (int) (p5 >> 32), (int) (p6 >> 32), (int) (p7 >> 32));
+            const __m256i frac = _mm256_setr_epi32 ((int) ((juce::uint32) p0 >> 9), (int) ((juce::uint32) p1 >> 9),
+                                                    (int) ((juce::uint32) p2 >> 9), (int) ((juce::uint32) p3 >> 9),
+                                                    (int) ((juce::uint32) p4 >> 9), (int) ((juce::uint32) p5 >> 9),
+                                                    (int) ((juce::uint32) p6 >> 9), (int) ((juce::uint32) p7 >> 9));
+           #if NEONSYNTH_GRAINS_AVX2_GATHER
+            const __m256 xm1 = _mm256_i32gather_ps (data - 1, idx, 4);
+            const __m256 x0  = _mm256_i32gather_ps (data,     idx, 4);
+            const __m256 x1  = _mm256_i32gather_ps (data + 1, idx, 4);
+            const __m256 x2  = _mm256_i32gather_ps (data + 2, idx, 4);
+           #else
+            juce::ignoreUnused (idx);
+            const float* d0 = data + (int) (p0 >> 32); const float* d1 = data + (int) (p1 >> 32);
+            const float* d2 = data + (int) (p2 >> 32); const float* d3 = data + (int) (p3 >> 32);
+            const float* d4 = data + (int) (p4 >> 32); const float* d5 = data + (int) (p5 >> 32);
+            const float* d6 = data + (int) (p6 >> 32); const float* d7 = data + (int) (p7 >> 32);
+            const __m256 xm1 = _mm256_setr_ps (d0[-1], d1[-1], d2[-1], d3[-1], d4[-1], d5[-1], d6[-1], d7[-1]);
+            const __m256 x0  = _mm256_setr_ps (d0[0],  d1[0],  d2[0],  d3[0],  d4[0],  d5[0],  d6[0],  d7[0]);
+            const __m256 x1  = _mm256_setr_ps (d0[1],  d1[1],  d2[1],  d3[1],  d4[1],  d5[1],  d6[1],  d7[1]);
+            const __m256 x2  = _mm256_setr_ps (d0[2],  d1[2],  d2[2],  d3[2],  d4[2],  d5[2],  d6[2],  d7[2]);
+           #endif
+            const juce::uint64 p = p7 + step;
+
+            const __m256i bits = _mm256_or_si256 (exponent, frac);
+            const __m256 t = _mm256_sub_ps (_mm256_castsi256_ps (bits), one);
+
+            const __m256 c1 = _mm256_mul_ps (half, _mm256_sub_ps (x1, xm1));
+            const __m256 c2 = _mm256_sub_ps (_mm256_add_ps (_mm256_sub_ps (xm1, _mm256_mul_ps (twoHalf, x0)), _mm256_mul_ps (two, x1)), _mm256_mul_ps (half, x2));
+            const __m256 c3 = _mm256_add_ps (_mm256_mul_ps (half, _mm256_sub_ps (x2, xm1)), _mm256_mul_ps (oneHalf, _mm256_sub_ps (x0, x1)));
+            const __m256 v  = _mm256_add_ps (_mm256_mul_ps (_mm256_add_ps (_mm256_mul_ps (_mm256_add_ps (_mm256_mul_ps (c3, t), c2), t), c1), t), x0);
+
+            const __m256 x = _mm256_mul_ps (_mm256_cvtepi32_ps (ages), windowStep);
+            const __m256 u = _mm256_mul_ps (four, _mm256_sub_ps (x, _mm256_mul_ps (x, x)));
+            _mm256_storeu_ps (out + s, _mm256_add_ps (_mm256_loadu_ps (out + s), _mm256_mul_ps (v, _mm256_mul_ps (u, u))));
+
+            position = p;
+            ages = _mm256_add_epi32 (ages, ageStep);
+        }
+
+        g.position = position;
+        g.age += s;
+
+        // Clear the upper halves of the 256-bit registers before returning to code
+        // compiled for SSE: on some Intel CPUs mixing the two without this costs a
+        // slow state transition on every SSE instruction that follows.
+        _mm256_zeroupper();
+        return s;
+    }
+   #endif
 
     void startGrain() noexcept
     {
@@ -338,7 +507,7 @@ private:
         g.data        = sample->getData (level);
         g.position    = (juce::uint64) (start * 4294967296.0);
         g.step        = (juce::uint64) (increment * 4294967296.0);
-        g.windowPhase = 0.0f;
+        g.age         = 0;
         g.windowStep  = 1.0f / (float) sizeSamples;
         g.remaining   = sizeSamples;
         g.lengthScale = 1.0f / (float) juce::jmax (1, length);

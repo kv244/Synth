@@ -200,8 +200,10 @@ ctest --test-dir build -C Release --output-on-failure
 | One note | 0.10% |
 | 16 voices at full velocity | 1.3% |
 | 16 voices playing the built-in sample, looped | 1.1% |
-| 16 voices on the granular source, 32 grains each (200 grains/s of 250 ms: the worst case) | 6.9% |
+| 16 voices on the granular source, 32 grains each (200 grains/s of 250 ms: the worst case) | 6.2% |
 | Sequencer at 1/32, 240 BPM, plus an 8-note chord every 250 ms | 1.3% |
+
+The grain loop has three versions of the same arithmetic, picked at run time: AVX2 (8 samples per step, when the CPU has it), SSE2 (4 per step, every x86-64 CPU) and scalar. They render bit-identical audio, so a session sounds the same on every machine; `GranularTests` checks this. Per grain and output sample on the development machine (Core Ultra 9 185H): scalar 4.7 ns, SSE2 2.3 ns, AVX2 2.2 ns. The loop is bound by its four reads per sample, which is why the wider AVX2 registers gain little.
 
 Timing the plugin through pedalboard is not a reliable CPU measure: render times there varied several-fold with the output level alone.
 
