@@ -2,9 +2,9 @@ name: Build
 
 on:
   push:
-    branches: [master, main]
+    branches: [master, main, oscillators]
   pull_request:
-    branches: [master, main]
+    branches: [master, main, oscillators]
 
 permissions:
   contents: read
@@ -52,9 +52,7 @@ jobs:
             -DNEONSYNTH_BUILD_TESTS=ON
 
       - name: Build VST3 and unit tests
-        run: cmake --build build --target NeonSynth_VST3 StepSequencerTests VoiceEnvelopeTests
+        run: cmake --build build --target NeonSynth_VST3 unit_tests
 
       - name: Unit tests (GCC)
-        run: |
-          build/StepSequencerTests_artefacts/Release/StepSequencerTests
-          build/VoiceEnvelopeTests_artefacts/Release/VoiceEnvelopeTests
+        run: ctest --test-dir build --output-on-failure
