@@ -14,6 +14,7 @@ by **Razvan Julian Petrescu** / **AudioDSP**.
 ## Features
 
 - **4 Waveforms** — Sine, Square, Triangle, Sawtooth
+- **Granular** — a cloud of up to 32 short grains per voice from the same sample: position, scan (moving through the file at up to ±2× its speed, or frozen), grain size, density, spray and pitch jitter; seeded, so the same MIDI renders the same audio
 - **Sample playback** — load a WAV, AIFF or FLAC file (or drop it on the window) and play it across the keyboard: root note, start point, One-shot / Loop / Loop until release with a crossfaded loop, and band-limited copies so high notes don't alias. A built-in pad plays until you load a file, and the sample is saved inside the session
 - **Low-pass Filter** — adjustable cutoff (20 Hz – 20 kHz) with on/off bypass toggle
 - **16-voice Polyphony** — up to 16 simultaneous notes, with click-free voice stealing
@@ -117,12 +118,13 @@ the **AudioDSP** manufacturer in your DAW's instrument browser.
 
 | Control | Colour | Description |
 |---|---|---|
-| Source | Cyan | What the voices play — Oscillator (the Waveform below) or Sample (Granular arrives with the next phase and plays as Sample until then) |
+| Source | Cyan | What the voices play — Oscillator (the Waveform below), Sample, or Granular (grains of the sample) |
 | Waveform | Cyan | Oscillator shape — Sine / Square / Triangle / Sawtooth (dimmed when Source isn't Oscillator) |
 | LOAD / PAD | Cyan | Load a WAV, AIFF or FLAC file (or drop one anywhere on the window); PAD returns to the built-in pad. The file name, its length and its sample rate (for example `pad.wav  2.5 s  44.1 kHz`) and any loading problem are shown beside them; a long name is shortened, and the tooltip shows the full path |
 | Loop mode | Cyan | One-shot plays to the end; Loop loops while the note sounds (release included); Loop until release loops while the key is held, then plays on to the end |
 | Sample view | Cyan | The waveform with the start (cyan line), the loop (amber brackets) and a white playhead per sounding voice; drag a marker to move it, click to set the start |
 | ROOT / START / L.START / L.END / XFADE | Cyan | Root key (plays the file at its own pitch), start point, loop start and end, and the loop crossfade (5–50 ms) |
+| ROOT / POS / SCAN / SIZE / DENS / SPRAY / JITTER | Magenta | With Source = Granular the knob row changes: position of the cloud (also draggable on the waveform), scan speed (−2× to +2×, 0 freezes), grain size (5–500 ms), density (1–200 grains/s), spray (how far grains scatter from the position) and pitch jitter (0–100 cents). The waveform then shows the position, the spray band and a tick per sounding grain |
 | ATK / DEC / SUS / REL | Amber | Envelope knobs, with their values shown underneath; the graph above them draws the shape and a dot for every sounding voice |
 | Filter ON | Magenta | Toggle button — enables / bypasses the filter (dims the cutoff slider when off) |
 | Cutoff | Magenta | Low-pass filter cutoff frequency (20 Hz – 20 kHz) |
@@ -184,6 +186,7 @@ ctest --test-dir build -C Release --output-on-failure
 | `OscillatorTests` | The oscillator: pitch and DC offset of every waveform, level at high pitch, band-limited saw step, waveform changes waiting for the cycle boundary, phase kept across pitch changes (16 checks) |
 | `SampleDataTests` | The sample: mono mix, −1 dBFS normalisation, 24-bit grid, 60 s cap, decimated copies (pitch kept, aliasing removed), exact FLAC round trip, file loading, the built-in pad, and the lock-free hand-off freeing replaced samples only when safe, including 2000 swaps under load (39 checks) |
 | `SampleReaderTests` | Sample playback: pitch tracking (and across sample rates), which band-limited copy each pitch reads, no aliasing at +24 semitones, steady level through crossfaded loops, smooth off-cycle loops, One-shot ends, Loop until release, start offset, the sample reference count (23 checks) |
+| `GranularTests` | The granular source: bit-identical renders from the same seed, grain counts at 5 / 50 / 200 per second, steady level across size and density, pitch, the 32-grain cap, scan speed and freeze, retrigger without cutting grains, stopping, the sample reference |
 | `RealtimeSafetyTests` | Hooks `operator new`/`delete` and fails if `processBlock` allocates or frees while rendering chords, the sequencer and every waveform as another thread keeps replacing the sample |
 | `RenderBenchmark` | Times `processBlock` directly (no host) for idle, one note, 16 voices and a dense sequencer + chords load |
 
@@ -197,6 +200,7 @@ ctest --test-dir build -C Release --output-on-failure
 | One note | 0.10% |
 | 16 voices at full velocity | 1.3% |
 | 16 voices playing the built-in sample, looped | 1.1% |
+| 16 voices on the granular source, 32 grains each (200 grains/s of 250 ms: the worst case) | 6.9% |
 | Sequencer at 1/32, 240 BPM, plus an 8-note chord every 250 ms | 1.3% |
 
 Timing the plugin through pedalboard is not a reliable CPU measure: render times there varied several-fold with the output level alone.
@@ -326,6 +330,7 @@ a fixed 120 BPM tempo, with real time preserved via tick timing.
 | Release mid-decay | With Sustain 0, a note released during its decay fades over the Release time without a click |
 | Sustain change | Changing Sustain while a note is held ramps the level instead of clicking |
 | State round trip | The pattern is saved and restored; a state without a pattern loads the default |
+| Granular | With Source = Granular and a C4 sine loaded, C5 peaks at 523 Hz, and two renders of the same MIDI are identical |
 | Sample pitch | With Source = Sample and a C4 sine loaded, C3 / C4 / C5 sound at 130.8 / 261.6 / 523.3 Hz; One-shot goes silent when the file ends |
 | Sample state | A file named in the state loads and is embedded as FLAC; another instance restores it from the embedded copy after the file is deleted; a missing sample keeps its reference; a v1.4 state loads the built-in pad |
 | Channel 16 key | A keyboard note on channel 16 survives the sequencer playing the same pitch |
@@ -399,6 +404,7 @@ audio_bright = plugin.process(msgs, 2.5, SR, reset=True)
 | `SampleSlot.h` | Lock-free hand-off of the current sample to the audio thread; frees replaced samples only when safe |
 | `SampleLoader.h` | Loads WAV, AIFF and FLAC files and embedded FLAC; renders the built-in pad |
 | `SampleReader.h` | Plays a note from the sample: pitch, cubic interpolation, band-limited copies, crossfaded loops |
+| `GrainCloud.h` | The granular source: grain scheduler, 32-grain pool, Hann window, scan, spray and jitter |
 | `SampleView.h` | The sample's waveform in the editor, with draggable markers and live playheads |
 | `NeonSynthProcessor.h/cpp` | `AudioProcessor` — parameter management, MIDI, state |
 | `NeonSynthEditor.h` | Neon UI — layout, controls, resizing, the 30 Hz timer that feeds the visualisers |
@@ -412,6 +418,7 @@ audio_bright = plugin.process(msgs, 2.5, SR, reset=True)
 | `tests/OscillatorTests.cpp` | Unit tests for the oscillator |
 | `tests/SampleDataTests.cpp` | Unit tests for the sample, its loader and the hand-off |
 | `tests/SampleReaderTests.cpp` | Unit tests for sample playback |
+| `tests/GranularTests.cpp` | Unit tests for the granular source |
 | `tests/RealtimeSafetyTests.cpp` | Fails if `processBlock` allocates |
 | `tests/RenderBenchmark.cpp` | CPU benchmark of `processBlock` |
 | `Visualisers.h` | Oscilloscope, spectrum analyser, ADSR graph, voice lights and L/R meter (message thread only) |

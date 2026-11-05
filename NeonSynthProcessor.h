@@ -20,6 +20,7 @@ public:
     using AudioProcessor::processBlock;   // keep the double-precision overload visible
     void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages) override;
     void releaseResources() override;
+    void reset() override;
 
     bool isBusesLayoutSupported (const BusesLayout& layouts) const override;
 
@@ -84,6 +85,9 @@ public:
         std::atomic<float> secondsSinceOn { 0.0f };
         std::atomic<float> secondsSinceOff { -1.0f };
         std::atomic<float> samplePosition { -1.0f };   // 0..1 while playing the sample, else -1
+        std::array<std::atomic<float>, NeonSynthVoice::Telemetry::maxShownGrains> grainPositions;   // 0..1 per sounding grain, else -1
+
+        VoiceView() { for (auto& g : grainPositions) g.store (-1.0f); }
     };
 
     const std::array<VoiceView, numVoices>& getVoiceViews() const noexcept { return voiceViews; }
@@ -225,6 +229,13 @@ private:
     juce::AudioParameterFloat*  smpLoopStartParameter  = nullptr;
     juce::AudioParameterFloat*  smpLoopEndParameter    = nullptr;
     juce::AudioParameterFloat*  smpXfadeParameter      = nullptr;
+
+    juce::AudioParameterFloat*  grPosParameter         = nullptr;
+    juce::AudioParameterFloat*  grScanParameter        = nullptr;
+    juce::AudioParameterFloat*  grSizeParameter        = nullptr;
+    juce::AudioParameterFloat*  grDensityParameter     = nullptr;
+    juce::AudioParameterFloat*  grSprayParameter       = nullptr;
+    juce::AudioParameterFloat*  grJitterParameter      = nullptr;
 
     juce::SmoothedValue<float> outputGain { 1.0f };
 

@@ -114,6 +114,20 @@ juce::AudioProcessorValueTreeState::ParameterLayout NeonSynthProcessor::createPa
     layout.add (std::make_unique<AudioParameterFloat>  (ParameterID { "smpLoopEnd", 1 }, "Sample Loop End", 0.0f, 1.0f, 1.0f));
     layout.add (std::make_unique<AudioParameterFloat>  (ParameterID { "smpXfade", 1 }, "Sample Crossfade",
                                                          NormalisableRange<float> (5.0f, 50.0f, 0.1f), 10.0f));       // milliseconds
+
+    // Granular. Position stays live; the others shape each grain as it starts.
+    NormalisableRange<float> grainSizeRange (5.0f, 500.0f, 0.1f);
+    grainSizeRange.setSkewForCentre (80.0f);
+    NormalisableRange<float> grainDensityRange (1.0f, 200.0f, 0.1f);
+    grainDensityRange.setSkewForCentre (30.0f);
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "grPos", 1 }, "Grain Position", 0.0f, 1.0f, 0.5f));
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "grScan", 1 }, "Grain Scan",
+                                                        NormalisableRange<float> (-2.0f, 2.0f, 0.01f), 0.0f));          // x the file's speed; 0 freezes
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "grSize", 1 }, "Grain Size", grainSizeRange, 80.0f));            // ms
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "grDensity", 1 }, "Grain Density", grainDensityRange, 30.0f));   // grains per second
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "grSpray", 1 }, "Grain Spray", 0.0f, 1.0f, 0.1f));
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "grJitter", 1 }, "Grain Pitch Jitter",
+                                                        NormalisableRange<float> (0.0f, 100.0f, 0.1f), 0.0f));          // cents
     return layout;
 }
 
@@ -122,7 +136,10 @@ NeonSynthProcessor::NeonSynthProcessor()
       apvts (*this, nullptr, "Parameters", createParameterLayout())
 {
     for (int i = 0; i < numVoices; ++i)
+    {
         voices.push_back (static_cast<NeonSynthVoice*> (synth.addVoice (new NeonSynthVoice())));
+        voices.back()->setVoiceIndex (i);
+    }
 
     synth.addSound (new NeonSynthSound());
 
@@ -156,6 +173,12 @@ NeonSynthProcessor::NeonSynthProcessor()
     smpLoopStartParameter  = getTypedParameter<juce::AudioParameterFloat>  (apvts, "smpLoopStart");
     smpLoopEndParameter    = getTypedParameter<juce::AudioParameterFloat>  (apvts, "smpLoopEnd");
     smpXfadeParameter      = getTypedParameter<juce::AudioParameterFloat>  (apvts, "smpXfade");
+    grPosParameter         = getTypedParameter<juce::AudioParameterFloat>  (apvts, "grPos");
+    grScanParameter        = getTypedParameter<juce::AudioParameterFloat>  (apvts, "grScan");
+    grSizeParameter        = getTypedParameter<juce::AudioParameterFloat>  (apvts, "grSize");
+    grDensityParameter     = getTypedParameter<juce::AudioParameterFloat>  (apvts, "grDensity");
+    grSprayParameter       = getTypedParameter<juce::AudioParameterFloat>  (apvts, "grSpray");
+    grJitterParameter      = getTypedParameter<juce::AudioParameterFloat>  (apvts, "grJitter");
 
     loadDefaultPattern();
     publishSample (SampleLoader::makeDefaultSample());
@@ -167,6 +190,13 @@ NeonSynthProcessor::NeonSynthProcessor()
 NeonSynthProcessor::~NeonSynthProcessor()
 {
     sampleLoader.removeAllJobs (true, 10000);   // a running load finishes before the slot it publishes into goes away
+}
+
+void NeonSynthProcessor::reset()
+{
+    // Repeating a render from here gives the same grains (hosts call this before offline renders).
+    for (auto* v : voices)
+        v->resetSeeds();
 }
 
 void NeonSynthProcessor::releaseResources()
@@ -217,6 +247,8 @@ void NeonSynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
     params.sample = blockSample;
     params.sampleSettings = { smpRootParameter->get(), smpStartParameter->get(), smpLoopParameter->getIndex(),
                               smpLoopStartParameter->get(), smpLoopEndParameter->get(), smpXfadeParameter->get() * 0.001f };
+    params.grainSettings  = { grPosParameter->get(), grScanParameter->get(), grSizeParameter->get() * 0.001f,
+                              grDensityParameter->get(), grSprayParameter->get(), grJitterParameter->get() };
 
     // Every voice shares the same settings. TODO: per-voice detune for unison, or extra harmonics.
     for (auto* v : voices)
@@ -273,6 +305,8 @@ void NeonSynthProcessor::publishVoiceViews() noexcept
         v.secondsSinceOn .store (t.secondsSinceOn,  std::memory_order_relaxed);
         v.secondsSinceOff.store (t.secondsSinceOff, std::memory_order_relaxed);
         v.samplePosition .store (t.samplePosition,  std::memory_order_relaxed);
+        for (size_t g = 0; g < v.grainPositions.size(); ++g)
+            v.grainPositions[g].store ((int) g < t.numGrains ? t.grainPositions[g] : -1.0f, std::memory_order_relaxed);
     }
 }
 
