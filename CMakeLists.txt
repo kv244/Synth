@@ -10,6 +10,14 @@ if(NOT DEFINED JUCE_DIR)
 endif()
 add_subdirectory("${JUCE_DIR}" "${CMAKE_BINARY_DIR}/JUCE")
 
+# No fused multiply-add contraction. The grain loop (GrainCloud.h) has scalar, SSE2 and
+# AVX2 versions that must render bit-identical audio, so a session sounds the same on
+# every machine. A compiler allowed to fuse a*b+c into one FMA (one rounding instead of
+# two) does it differently in each version: GCC and Clang do so by default whenever the
+# target has FMA (GCC 15 on Ubuntu 26.04 does, out of the box). MSVC doesn't contract
+# unless asked (/fp:contract), so it needs no flag.
+add_compile_options($<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>>:-ffp-contract=off>)
+
 juce_add_plugin(NeonSynth
     VERSION                     1.4.0
     COMPANY_NAME                "AudioDSP"

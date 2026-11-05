@@ -259,6 +259,8 @@ private:
     // there is deliberately no FMA (a fused multiply-add rounds once instead of
     // twice), so all three render bit-identical audio: the same session sounds
     // the same on every machine, and the tests can compare the paths directly.
+    // "No FMA" needs the compiler's help too: GCC and Clang fuse a*b+c on their
+    // own when the target has FMA, so CMakeLists.txt builds with -ffp-contract=off.
     //
     // What makes this loop expensive is not the arithmetic but the four reads
     // per sample from four different positions; the SIMD versions do the maths
