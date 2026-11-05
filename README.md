@@ -48,7 +48,7 @@ Run `NeonSynth-x.y.z-Windows-Setup.exe`. The wizard installs the VST3 to
 Releases are published only from a version tag; merging to `master` publishes nothing.
 
 1. Set the new version in `CMakeLists.txt` (both places) and `installer.nsi`, and merge it to `master`.
-2. Tag it: `git tag v1.4.0 && git push origin v1.4.0`.
+2. Tag it: `git tag v1.5.0 && git push origin v1.5.0`.
 
 The Release workflow refuses a tag that doesn't match `CMakeLists.txt`, or one that already has a release, then runs every test and pluginval at strictness 10 before building the installer.
 
@@ -189,7 +189,7 @@ ctest --test-dir build -C Release --output-on-failure
 | `SampleReaderTests` | Sample playback: pitch tracking (and across sample rates), which band-limited copy each pitch reads, no aliasing at +24 semitones, steady level through crossfaded loops, smooth off-cycle loops, One-shot ends, Loop until release, start offset, the sample reference count (23 checks) |
 | `GranularTests` | The granular source: bit-identical renders from the same seed, grain counts at 5 / 50 / 200 per second, steady level across size and density, pitch, the 32-grain cap, scan speed and freeze, retrigger without cutting grains, stopping, the sample reference |
 | `RealtimeSafetyTests` | Hooks `operator new`/`delete` and fails if `processBlock` allocates or frees while rendering chords, the sequencer, every waveform and every source as another thread keeps replacing the sample |
-| `RenderBenchmark` | Times `processBlock` directly (no host) for idle, one note, 16 voices and a dense sequencer + chords load |
+| `RenderBenchmark` | Times `processBlock` directly (no host) for idle, one note, 16 voices, 16 voices on each of the Sample, Random and Granular sources, and a dense sequencer + chords load |
 
 ### Performance
 
@@ -200,7 +200,8 @@ ctest --test-dir build -C Release --output-on-failure
 | Idle | 0.01% |
 | One note | 0.10% |
 | 16 voices at full velocity | 1.3% |
-| 16 voices playing the built-in sample, looped | 1.1% |
+| 16 voices playing the built-in sample, looped | 1.0% |
+| 16 voices on the Random source | 1.1% |
 | 16 voices on the granular source, 32 grains each (200 grains/s of 250 ms: the worst case) | 6.2% |
 | Sequencer at 1/32, 240 BPM, plus an 8-note chord every 250 ms | 1.3% |
 

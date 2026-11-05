@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(NeonSynth VERSION 1.4.0 LANGUAGES C CXX)
+project(NeonSynth VERSION 1.5.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -19,7 +19,7 @@ add_subdirectory("${JUCE_DIR}" "${CMAKE_BINARY_DIR}/JUCE")
 add_compile_options($<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>>:-ffp-contract=off>)
 
 juce_add_plugin(NeonSynth
-    VERSION                     1.4.0
+    VERSION                     1.5.0
     COMPANY_NAME                "AudioDSP"
     COMPANY_WEBSITE             "https://audiodsp.com"
     BUNDLE_ID                   "com.audiodsp.neonsynth"
