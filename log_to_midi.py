@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""Convert a BasicSynth --midilog text log into a Standard MIDI File (.mid).
+# NeonSynth - Copyright (C) 2026 Razvan Julian Petrescu
+# SPDX-License-Identifier: AGPL-3.0-only
+# Licensed under the GNU Affero General Public License v3; see LICENSE.
+"""Convert a NeonSynth --midilog text log into a Standard MIDI File (.mid).
 
 Usage:
     python log_to_midi.py <input.log> [output.mid]
 
-The log format (one event per line) is produced by BasicSynthProcessor.cpp:
+The log format (one event per line) is produced by NeonSynthProcessor.cpp:
     [6.262s] Note on A2 Velocity 51 Channel 1
     [6.752s] Note off A2 Velocity 0 Channel 1
     [6.802s] All notes off Channel 1

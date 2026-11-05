@@ -1,5 +1,6 @@
 # Neon Synth
 
+[![Test](https://github.com/kv244/Synth/actions/workflows/test.yml/badge.svg)](https://github.com/kv244/Synth/actions/workflows/test.yml)
 [![Build](https://github.com/kv244/Synth/actions/workflows/build.yml/badge.svg)](https://github.com/kv244/Synth/actions/workflows/build.yml)
 [![Lint](https://github.com/kv244/Synth/actions/workflows/lint.yml/badge.svg)](https://github.com/kv244/Synth/actions/workflows/lint.yml)
 [![Release](https://github.com/kv244/Synth/actions/workflows/release.yml/badge.svg)](https://github.com/kv244/Synth/actions/workflows/release.yml)
@@ -15,15 +16,16 @@ by **Razvan Julian Petrescu** / **AudioDSP**.
 - **4 Waveforms** — Sine, Square, Triangle, Sawtooth
 - **Low-pass Filter** — adjustable cutoff (20 Hz – 20 kHz) with on/off bypass toggle
 - **16-voice Polyphony** — up to 16 simultaneous notes, with click-free voice stealing
-- **ADSR envelope** — linear segments whose durations match the knob values
+- **ADSR envelope** — linear segments whose durations match the knob values; Sustain changes glide (10 ms) instead of stepping, and a release always takes the Release time, whenever the note is let go
 - **Band-limited oscillators** — PolyBLEP square and sawtooth to reduce aliasing
 - **Output gain** — host-automatable output level (−48 dB to +6 dB)
+- **Headroom protection** — an output soft clipper, untouched below −6 dBFS, keeps even 16 full-velocity voices under −1 dBFS
 - **Stereo width** — voices are panned by pitch (middle C centred, two octaves either side at the edges); 0% is mono, 100% full spread
 - **Visualisers** — triggered oscilloscope locked to the lowest held note, spectrum analyser with the live filter curve, ADSR shape with a dot per sounding voice, 16 voice lights and an L/R output meter with peak hold and clip light
-- **16-step sequencer** — sample-accurate, synced to the host transport or its own tempo, with swing, gate, five step rates and three keyboard modes (Layer / Replace / Transpose); the pattern is saved with the session
+- **16-step sequencer** — sample-accurate end to end, synced to the host transport or its own tempo, with swing, gate, five step rates and three keyboard modes (Layer / Replace / Transpose); the pattern is saved with the session
 - **Custom neon GUI** — background image, cyan/magenta/amber controls; resizable from 75% to 200%; a **?** button opens quick help
 - **MIDI** — works with any MIDI controller or keyboard
-- **MIDI Logging** — optional, real-time-safe logging of received MIDI messages to a file (`BASICSYNTH_MIDILOG=<file>`, or `--midilog <file>` in the Standalone)
+- **MIDI Logging** — optional, real-time-safe logging of received MIDI messages to a file (`NEONSYNTH_MIDILOG=<file>`, or `--midilog <file>` in the Standalone)
 - **DAW automation** — all parameters are automatable in VST3 hosts
 
 ---
@@ -35,6 +37,17 @@ Pre-built Windows installer: **[Latest release →](https://github.com/kv244/Syn
 Run `NeonSynth-x.y.z-Windows-Setup.exe`. The wizard installs the VST3 to
 `C:\Program Files\Common Files\VST3\` and optionally the standalone app to
 `C:\Program Files\AudioDSP\Neon Synth\`.
+
+---
+
+## Releasing
+
+Releases are published only from a version tag; merging to `master` publishes nothing.
+
+1. Set the new version in `CMakeLists.txt` (both places) and `installer.nsi`, and merge it to `master`.
+2. Tag it: `git tag v1.4.0 && git push origin v1.4.0`.
+
+The Release workflow refuses a tag that doesn't match `CMakeLists.txt`, or one that already has a release, then runs every test and pluginval at strictness 10 before building the installer.
 
 ---
 
@@ -72,8 +85,8 @@ cmake --build build --config Release
 
 | Format | Path |
 |---|---|
-| Standalone | `build/BasicSynth_artefacts/Release/Standalone/BasicSynth.exe` |
-| VST3 | `build/BasicSynth_artefacts/Release/VST3/BasicSynth.vst3/` |
+| Standalone | `build/NeonSynth_artefacts/Release/Standalone/NeonSynth.exe` |
+| VST3 | `build/NeonSynth_artefacts/Release/VST3/NeonSynth.vst3/` |
 
 ---
 
@@ -81,21 +94,21 @@ cmake --build build --config Release
 
 ### Standalone
 
-Run `BasicSynth.exe`. Click **Options → Audio/MIDI Settings** to select your
+Run `NeonSynth.exe`. Click **Options → Audio/MIDI Settings** to select your
 audio output and MIDI input device, then play from any connected MIDI keyboard.
 
 **No MIDI keyboard?** Press **RUN** — the step sequencer plays its pattern on its own. To play notes, use a virtual keyboard such as [VMPK](https://vmpk.sourceforge.io/) routed through [loopMIDI](https://www.tobias-erichsen.de/software/loopmidi.html), then tick the loopMIDI port under MIDI inputs.
 
 **No sound?** Check that the output device is selected and its channels are ticked under *Active output channels*. Laptop speakers reproduce very little below about 200 Hz, so low notes on the Sine or Triangle waveform can be almost inaudible — switch to Sawtooth or Square, raise the notes, or use headphones. The **?** button in the top-right corner has these tips too.
 
-You can also launch the standalone application with the `--midilog <file>` parameter, or set the `BASICSYNTH_MIDILOG` environment variable, to log real-time MIDI input:
+You can also launch the standalone application with the `--midilog <file>` parameter, or set the `NEONSYNTH_MIDILOG` environment variable, to log real-time MIDI input:
 ```bash
-BasicSynth.exe --midilog log.txt
+NeonSynth.exe --midilog log.txt
 ```
 
 ### VST3
 
-Copy the `BasicSynth.vst3` bundle to your DAW's VST3 folder
+Copy the `NeonSynth.vst3` bundle to your DAW's VST3 folder
 (typically `C:\Program Files\Common Files\VST3\`). The plugin appears under
 the **AudioDSP** manufacturer in your DAW's instrument browser.
 
@@ -109,7 +122,7 @@ the **AudioDSP** manufacturer in your DAW's instrument browser.
 | Cutoff | Magenta | Low-pass filter cutoff frequency (20 Hz – 20 kHz) |
 | Voices | Cyan | One light per voice; brightness follows that voice's envelope |
 | Scope / Spectrum | Cyan | Output display: an oscilloscope locked to the lowest held note, or a spectrum with the filter's response curve drawn on top |
-| Meter | Cyan | Left / right output level with peak hold; the red light marks clipping (click the meter to reset) |
+| Meter | Cyan | Left / right output level with peak hold; the red light shows the output soft clipper working near its −1 dBFS ceiling (click the meter to reset) |
 | Gain | Cyan | Output level, −48 dB to +6 dB |
 | Width | Cyan | Stereo spread of voices by pitch, 0–100% |
 | ? | Cyan | Quick help drawn over the window — sequencer editing, modes, controls and no-sound tips. Click anywhere or press Esc to close |
@@ -133,10 +146,48 @@ A 16-step sequencer sits along the bottom of the window. It is **off by default*
 
 Notes on behaviour:
 
-- Every step is placed on an exact sample, derived from the transport each block, so timing does not drift and does not depend on the host's buffer size.
-- The sequencer plays on MIDI channel 16, so its note-offs never cut off a note of the same pitch that you are playing on the keyboard.
+- Every step is placed on an exact sample, derived from the transport each block, so timing does not drift and does not depend on the host's buffer size. The synth also starts every note on its exact sample (it renders up to each MIDI event rather than in 32-sample chunks).
+- Small irregularities in the host's beat position — a tempo change inside a block, rounding — of up to 2 ms are treated as continuous playback; only a real jump (a loop or locate) releases held notes.
+- With SYNC on in a DAW, the sequencer follows the DAW's transport: press play in the DAW to hear it.
+- The sequencer and the keyboard never cut off each other's notes, even on the same pitch: the sequencer plays on its own MIDI channel, and keyboard input is moved to channel 1 whatever channel it arrives on.
 - The pattern (16 × on / note / velocity) is saved in the plugin state with the session and presets. Sessions saved with earlier versions load with the default pattern.
-- The engine is `StepSequencer.h`; it depends only on `juce_audio_basics` and is covered by its own unit tests (`tests/StepSequencerTests.cpp`, built with `-DBASICSYNTH_BUILD_TESTS=ON`).
+- The engine is `StepSequencer.h`; it depends only on `juce_audio_basics` and is covered by its own unit tests (`tests/StepSequencerTests.cpp`, see [Unit tests and benchmark](#unit-tests-and-benchmark)).
+
+---
+
+## Upgrading from BasicSynth
+
+Before v1.4 the plugin was called **BasicSynth**. It is now **NeonSynth** (`NeonSynth.vst3`, `NeonSynth.exe`). The plugin's internal ID is unchanged, so DAW projects saved with BasicSynth open with NeonSynth and keep their settings. The installer removes the old `BasicSynth.vst3` so your DAW doesn't list the plugin twice. The Standalone now stores its settings under the new name, so pick your audio and MIDI devices once more in **Options → Audio/MIDI Settings**. The `BASICSYNTH_MIDILOG` environment variable still works; `NEONSYNTH_MIDILOG` is the new name.
+
+---
+
+## Unit tests and benchmark
+
+Configure with `-DNEONSYNTH_BUILD_TESTS=ON` to add three console programs:
+
+```bash
+cmake -S . -B build -DJUCE_DIR="/path/to/JUCE" -DNEONSYNTH_BUILD_TESTS=ON
+cmake --build build --config Release --target StepSequencerTests VoiceEnvelopeTests RenderBenchmark
+```
+
+| Program | What it checks |
+|---|---|
+| `StepSequencerTests` | Sequencer timing, gate, swing, rates, block-size independence, stop and loop handling, tolerance of small transport drift, triggers disabled, retriggering, step packing (15 checks) |
+| `VoiceEnvelopeTests` | The voice envelope: identical to `juce::ADSR` with fixed settings, releases that survive parameter updates, sustain slew, retriggering, release-time changes (6 checks) |
+| `RenderBenchmark` | Times `processBlock` directly (no host) for idle, one note, 16 voices and a dense sequencer + chords load |
+
+### Performance
+
+`RenderBenchmark` on the development machine, 48 kHz with 512-sample blocks (share of one CPU core in real time):
+
+| Load | CPU |
+|---|---|
+| Idle | 0.01% |
+| One note | 0.10% |
+| 16 voices at full velocity | 1.3% |
+| Sequencer at 1/32, 240 BPM, plus an 8-note chord every 250 ms | 1.3% |
+
+Timing the plugin through pedalboard is not a reliable CPU measure: render times there varied several-fold with the output level alone.
 
 ---
 
@@ -148,7 +199,8 @@ MIDI ports, loopMIDI, or DAW required.
 ### Install dependencies
 
 ```bash
-pip install pedalboard mido numpy sounddevice soundfile
+pip install -r requirements-test.txt     # pedalboard, mido, numpy (pinned)
+pip install sounddevice soundfile        # optional: --play and --save
 ```
 
 ### Run all tests
@@ -165,16 +217,22 @@ Parameters: ['waveform', 'cutoff', 'filter_enabled', 'attack', 'decay', 'sustain
 
   PASS  Single note             RMS=0.0799
   PASS  Polyphony (4ch)         single=0.0799  chord=0.1596
-  PASS  Polyphony (8ch)         RMS=0.2247
-  PASS  Voice stealing          RMS=0.3135
+  PASS  Polyphony (8ch)         RMS=0.2234
+  PASS  Voice stealing          RMS=0.3051
   PASS  Release tail            tail RMS=0.052122
   PASS  Filter cutoff           HFR@1.5kHz  200Hz=0.0000  18kHz=0.0283
   PASS  Waveforms               Sine=0.0000  Square=0.0154  Triangle=0.0000  Sawtooth=0.0245
   PASS  Velocity scaling        vel20=0.0160  vel120=0.0959
-  PASS  Sequencer plays         on RMS=0.1145  off RMS=0.000000
-  PASS  Sequencer timing        12 notes, worst timing error 1.16 ms
+  PASS  Sequencer plays         on RMS=0.1121  off RMS=0.000000
+  PASS  Sequencer timing        12 notes, worst timing error 0 samples (0.000 ms)
+  PASS  No stuck note           RMS after release=0.0000000
+  PASS  Close events            notes at samples 4411 and 4431 (expected 4410, 4430)
+  PASS  Headroom                16 voices +6 dB: -1.00 dBFS  single note: -12.73 dBFS
+  PASS  Release mid-decay       tail RMS=0.0607  largest step=0.0093
+  PASS  Sustain change          largest step=0.0093  peak after the change=0.050
+  PASS  State round trip        one-step pattern: 1 note  no pattern: 12 notes (default)
 
-10/10 passed
+16/16 passed
 ```
 
 ### Render and hear audio
@@ -206,7 +264,7 @@ python test_midi.py --midilog log.txt
 ```
 
 > [!NOTE]
-> `test_midi.py` turns the path into an absolute one and passes it to the plugin through the `BASICSYNTH_MIDILOG` environment variable, so `log.txt` lands in your current directory. In a DAW, set `BASICSYNTH_MIDILOG` (preferably to an absolute path) before starting the host. Formatting and disk writes happen on a background thread, never on the audio thread.
+> `test_midi.py` turns the path into an absolute one and passes it to the plugin through the `NEONSYNTH_MIDILOG` environment variable, so `log.txt` lands in your current directory. In a DAW, set `NEONSYNTH_MIDILOG` (preferably to an absolute path) before starting the host. Each plugin instance writes its own file: the first uses the name as given, later ones add `-2`, `-3`, … before the extension (`log.txt`, `log-2.txt`, …). Formatting and disk writes happen on a background thread, never on the audio thread.
 
 Example log output:
 ```text
@@ -228,7 +286,7 @@ Example log output:
 Windows Media Player, a DAW, or a notation app can open directly:
 
 ```bash
-python log_to_midi.py build/BasicSynth_artefacts/Release/Standalone/midi.log
+python log_to_midi.py build/NeonSynth_artefacts/Release/Standalone/midi.log
 # writes midi.mid next to the input file
 ```
 
@@ -249,7 +307,13 @@ a fixed 120 BPM tempo, with real time preserved via tick timing.
 | Waveforms | Sine, Square, Triangle, Sawtooth produce distinct harmonic content |
 | Velocity scaling | Higher velocity produces proportionally louder output |
 | Sequencer plays | With the sequencer on, the pattern plays with no MIDI input; with it off, the output is silent |
-| Sequencer timing | At 120 BPM in 1/8 steps, every note of the default pattern starts on its step (within 5 ms) |
+| Sequencer timing | At 120 BPM in 1/8 steps, every note of the default pattern starts on its step, to within 2 samples |
+| No stuck note | A key pressed in Layer and released after switching to Transpose still stops |
+| Close events | Two notes 20 samples apart each start on their own sample |
+| Headroom | 16 full-velocity voices at +6 dB gain peak at −1 dBFS; a single note passes through unclipped |
+| Release mid-decay | With Sustain 0, a note released during its decay fades over the Release time without a click |
+| Sustain change | Changing Sustain while a note is held ramps the level instead of clicking |
+| State round trip | The pattern is saved and restored; a state without a pattern loads the default |
 
 ### Using the API directly
 
@@ -259,8 +323,8 @@ You can also drive the synth from your own Python scripts:
 import pedalboard, mido, numpy as np
 
 VST3 = (
-    r"build\BasicSynth_artefacts\Release\VST3"
-    r"\BasicSynth.vst3\Contents\x86_64-win\BasicSynth.vst3"
+    r"build\NeonSynth_artefacts\Release\VST3"
+    r"\NeonSynth.vst3\Contents\x86_64-win\NeonSynth.vst3"
 )
 
 plugin = pedalboard.load_plugin(VST3)
@@ -313,22 +377,46 @@ audio_bright = plugin.process(msgs, 2.5, SR, reset=True)
 
 | File | Purpose |
 |---|---|
-| `BasicSynth.h` | Voice and sound classes — oscillator, filter, envelope |
-| `BasicSynthProcessor.h/cpp` | `AudioProcessor` — parameter management, MIDI, state |
-| `BasicSynthEditor.h` | Neon UI — layout, controls, resizing, the 30 Hz timer that feeds the visualisers |
+| `NeonSynthVoice.h` | Voice and sound classes — oscillator, filter, envelope |
+| `NeonSynthProcessor.h/cpp` | `AudioProcessor` — parameter management, MIDI, state |
+| `NeonSynthEditor.h` | Neon UI — layout, controls, resizing, the 30 Hz timer that feeds the visualisers |
 | `MidiLogger.h` | Real-time-safe MIDI logging (lock-free FIFO + background writer thread) |
 | `StepSequencer.h` | Step sequencer engine — timing, swing, gate, note-off queue, lock-free pattern |
 | `SequencerView.h` | The 16-step grid in the editor (editing and playhead) |
 | `HelpOverlay.h` | Quick-help page opened by the editor's ? button |
-| `tests/StepSequencerTests.cpp` | Unit tests for the sequencer engine (`-DBASICSYNTH_BUILD_TESTS=ON`) |
+| `VoiceEnvelope.h` | The voice's ADSR envelope (slewed sustain, release rate fixed at note-off) |
+| `tests/StepSequencerTests.cpp` | Unit tests for the sequencer engine (`-DNEONSYNTH_BUILD_TESTS=ON`) |
+| `tests/VoiceEnvelopeTests.cpp` | Unit tests for the voice envelope |
+| `tests/RenderBenchmark.cpp` | CPU benchmark of `processBlock` |
 | `Visualisers.h` | Oscilloscope, spectrum analyser, ADSR graph, voice lights and L/R meter (message thread only) |
 | `CMakeLists.txt` | Build config — Standalone + VST3, JUCE path, binary resources |
 | `gui_background.png` | Neon grid background image (embedded as binary data) |
 | `icon.png` | Application / plugin icon |
 | `test_midi.py` | Automated Python test suite |
 | `pyproject.toml` | Ruff lint configuration |
-| `.github/workflows/build.yml` | CI — CMake build on Ubuntu |
+| `.github/workflows/test.yml` | CI on every PR — Windows build, unit tests, Python suite, pluginval (strictness 5), CPU benchmark |
+| `.github/workflows/build.yml` | CI — CMake build and unit tests on Ubuntu (GCC) |
 | `.github/workflows/lint.yml` | CI — Python ruff lint |
-| `.github/workflows/release.yml` | CI — builds installer and publishes GitHub Release on tag push |
+| `.github/workflows/release.yml` | Release on a version tag — all tests, pluginval (strictness 10), installer, GitHub Release |
+| `requirements-test.txt` | Pinned Python dependencies for `test_midi.py` |
 | `installer.nsi` | NSIS installer script (VST3 + Standalone) |
-| `LICENSE` | MIT licence |
+| `LICENSE` | GNU Affero General Public License v3 |
+
+---
+
+## License
+
+Copyright (C) 2026 Razvan Julian Petrescu. Portions assisted by Claude (Anthropic).
+
+NeonSynth is free software: you can redistribute it and/or modify it under the terms of the
+[GNU Affero General Public License version 3](LICENSE) (AGPL-3.0-only), as published by the Free
+Software Foundation. It is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+See the license for details.
+
+NeonSynth is built on [JUCE](https://juce.com), which it uses under JUCE's AGPLv3 option. If you
+distribute NeonSynth, or software built from it, you must make the complete corresponding source
+available under the same license; this repository is that source for the official releases.
+
+Releases up to and including v1.3.0 were published under the MIT license; from v1.4.0 the project
+is licensed under the AGPLv3.

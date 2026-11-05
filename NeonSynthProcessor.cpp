@@ -1,12 +1,21 @@
-#include "BasicSynthProcessor.h"
-#include "BasicSynthEditor.h"
+// NeonSynth - Copyright (C) 2026 Razvan Julian Petrescu
+// SPDX-License-Identifier: AGPL-3.0-only
+// Licensed under the GNU Affero General Public License v3; see LICENSE.
+
+#include "NeonSynthProcessor.h"
+#include "NeonSynthEditor.h"
 
 namespace
 {
-    /** Log path from BASICSYNTH_MIDILOG, or (Standalone only) from "--midilog <file>". */
+    /**
+        Log path from NEONSYNTH_MIDILOG, or (Standalone only) from "--midilog <file>".
+        BASICSYNTH_MIDILOG, the name before v1.4, still works.
+    */
     juce::String findMidiLogPath (juce::AudioProcessor::WrapperType wrapper)
     {
-        auto path = juce::SystemStats::getEnvironmentVariable ("BASICSYNTH_MIDILOG", {});
+        auto path = juce::SystemStats::getEnvironmentVariable ("NEONSYNTH_MIDILOG", {});
+        if (path.isEmpty())
+            path = juce::SystemStats::getEnvironmentVariable ("BASICSYNTH_MIDILOG", {});
 
         if (path.isEmpty() && wrapper == juce::AudioProcessor::wrapperType_Standalone)
         {
@@ -20,6 +29,24 @@ namespace
         return path;
     }
 
+    /**
+        Each plugin instance that logs gets its own file, so instances never
+        delete or overwrite each other's log: the first uses the path as given
+        (relative to the working directory), later ones in the same process add
+        "-2", "-3", ... before the extension (midi.log, midi-2.log, ...).
+    */
+    juce::File midiLogFileForNewInstance (const juce::String& path)
+    {
+        static std::atomic<int> loggingInstances { 0 };
+        const int instance = ++loggingInstances;
+
+        auto file = juce::File::getCurrentWorkingDirectory().getChildFile (path);
+        if (instance > 1)
+            file = file.getSiblingFile (file.getFileNameWithoutExtension() + "-" + juce::String (instance)
+                                        + file.getFileExtension());
+        return file;
+    }
+
     template <typename ParamType>
     ParamType* getTypedParameter (juce::AudioProcessorValueTreeState& state, const char* id)
     {
@@ -29,7 +56,7 @@ namespace
     }
 }
 
-juce::AudioProcessorValueTreeState::ParameterLayout BasicSynthAudioProcessor::createParameterLayout()
+juce::AudioProcessorValueTreeState::ParameterLayout NeonSynthProcessor::createParameterLayout()
 {
     using namespace juce;
 
@@ -74,14 +101,21 @@ juce::AudioProcessorValueTreeState::ParameterLayout BasicSynthAudioProcessor::cr
     return layout;
 }
 
-BasicSynthAudioProcessor::BasicSynthAudioProcessor()
+NeonSynthProcessor::NeonSynthProcessor()
     : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       apvts (*this, nullptr, "Parameters", createParameterLayout())
 {
     for (int i = 0; i < numVoices; ++i)
-        voices.push_back (static_cast<BasicSynthVoice*> (synth.addVoice (new BasicSynthVoice())));
+        voices.push_back (static_cast<NeonSynthVoice*> (synth.addVoice (new NeonSynthVoice())));
 
-    synth.addSound (new BasicSynthSound());
+    synth.addSound (new NeonSynthSound());
+
+    // By default juce::Synthesiser handles any MIDI event that falls within 32
+    // samples of its last render point immediately, so a note could start up to
+    // 31 samples early. Splitting on every event keeps keyboard and sequencer
+    // notes on their exact sample; the extra sub-blocks only appear when events
+    // are dense, and cost little (see README, "Performance").
+    synth.setMinimumRenderingSubdivisionSize (1, true);
 
     waveformParameter      = getTypedParameter<juce::AudioParameterChoice> (apvts, "waveform");
     cutoffParameter        = getTypedParameter<juce::AudioParameterFloat>  (apvts, "cutoff");
@@ -103,10 +137,10 @@ BasicSynthAudioProcessor::BasicSynthAudioProcessor()
     loadDefaultPattern();
 
     if (const auto path = findMidiLogPath (wrapperType); path.isNotEmpty())
-        midiLogger.start (juce::File::getCurrentWorkingDirectory().getChildFile (path));
+        midiLogger.start (midiLogFileForNewInstance (path));
 }
 
-void BasicSynthAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
+void NeonSynthProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     synth.setCurrentPlaybackSampleRate (sampleRate);
 
@@ -124,7 +158,7 @@ void BasicSynthAudioProcessor::prepareToPlay (double sampleRate, int samplesPerB
     numHeldKeys    = 0;
 }
 
-void BasicSynthAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
+void NeonSynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
 {
     juce::ScopedNoDenormals noDenormals;
     const int numSamples = buffer.getNumSamples();
@@ -134,7 +168,7 @@ void BasicSynthAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, j
     buffer.clear();
     midiLogger.push (midiMessages, samplesProcessed);   // lock-free; formatting/I/O happen elsewhere
 
-    BasicSynthVoice::Params params;
+    NeonSynthVoice::Params params;
     params.waveform = waveformParameter->getIndex();
     params.cutoffHz = cutoffParameter->get();
     params.filterOn = filterEnabledParameter->get();
@@ -158,6 +192,15 @@ void BasicSynthAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, j
     outputGain.setTargetValue (juce::Decibels::decibelsToGain (gainParameter->get()));
     outputGain.applyGain (buffer, numSamples);
 
+    // Headroom: 16 full-velocity voices can sum to about +12 dBFS. The soft
+    // clipper keeps the output under -1 dBFS and is bit-transparent below -6 dBFS.
+    for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+    {
+        auto* samples = buffer.getWritePointer (ch);
+        for (int i = 0; i < numSamples; ++i)
+            samples[i] = softClip (samples[i]);
+    }
+
     pushScope (buffer.getReadPointer (0),
                buffer.getReadPointer (buffer.getNumChannels() > 1 ? 1 : 0),   // mono bus: L == R
                numSamples);
@@ -165,7 +208,7 @@ void BasicSynthAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, j
     samplesProcessed += numSamples;
 }
 
-void BasicSynthAudioProcessor::pushScope (const float* left, const float* right, int numFrames) noexcept
+void NeonSynthProcessor::pushScope (const float* left, const float* right, int numFrames) noexcept
 {
     int i = 0;
     scopeFifo.write (numFrames).forEach ([&] (int index)
@@ -176,7 +219,7 @@ void BasicSynthAudioProcessor::pushScope (const float* left, const float* right,
     });
 }
 
-void BasicSynthAudioProcessor::publishVoiceViews() noexcept
+void NeonSynthProcessor::publishVoiceViews() noexcept
 {
     for (size_t i = 0; i < voices.size() && i < voiceViews.size(); ++i)
     {
@@ -190,7 +233,7 @@ void BasicSynthAudioProcessor::publishVoiceViews() noexcept
     }
 }
 
-int BasicSynthAudioProcessor::drainScope (float* destLeft, float* destRight, int maxFrames) noexcept
+int NeonSynthProcessor::drainScope (float* destLeft, float* destRight, int maxFrames) noexcept
 {
     int i = 0;
     scopeFifo.read (juce::jmin (maxFrames, scopeFifo.getNumReady())).forEach ([&] (int index)
@@ -202,7 +245,7 @@ int BasicSynthAudioProcessor::drainScope (float* destLeft, float* destRight, int
     return i;
 }
 
-bool BasicSynthAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
+bool NeonSynthProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
     const auto& out = layouts.getMainOutputChannelSet();
     return out == juce::AudioChannelSet::stereo() || out == juce::AudioChannelSet::mono();
@@ -220,11 +263,24 @@ namespace
     const juce::Identifier noteId     { "note" };
     const juce::Identifier velocityId { "velocity" };
 
+    /**
+        Saved-state format version, written as an attribute of the state tree.
+          (none) v1.0 - v1.3: parameters, the editor's view and, from v1.3, the pattern
+          2      v1.4+: same content; the attribute exists so later format changes
+                 can tell old sessions apart and migrate them
+    */
+    const juce::Identifier stateVersionId { "stateVersion" };
+    constexpr int currentStateVersion = 2;
+
+    /** Keyboard input is played on this channel; the sequencer has StepSequencer::midiChannel (16). */
+    constexpr int keyboardChannel = 1;
+    static_assert (keyboardChannel != StepSequencer::midiChannel);
+
     /** Notes are transposed relative to this key in Transpose mode (C4). */
     constexpr int transposeReferenceNote = 60;
 }
 
-void BasicSynthAudioProcessor::loadDefaultPattern() noexcept
+void NeonSynthProcessor::loadDefaultPattern() noexcept
 {
     // A C-minor bassline around C3 with octave jumps; notes are kept on the
     // "off" steps too, so switching a step on gives a sensible pitch.
@@ -240,13 +296,13 @@ void BasicSynthAudioProcessor::loadDefaultPattern() noexcept
         sequencer.setStep (i, pattern[i]);
 }
 
-void BasicSynthAudioProcessor::setSequencerStep (int index, const StepSequencer::Step& step)
+void NeonSynthProcessor::setSequencerStep (int index, const StepSequencer::Step& step)
 {
     sequencer.setStep (index, step);
     updateHostDisplay (ChangeDetails().withNonParameterStateChanged (true));
 }
 
-void BasicSynthAudioProcessor::trackHeldKey (int note, bool isDown) noexcept
+void NeonSynthProcessor::trackHeldKey (int note, bool isDown) noexcept
 {
     // Remove the key if present, then (for a key-down) append it as the most recent.
     for (int i = 0; i < numHeldKeys; ++i)
@@ -264,7 +320,7 @@ void BasicSynthAudioProcessor::trackHeldKey (int note, bool isDown) noexcept
         heldKeys[(size_t) numHeldKeys++] = note;
 }
 
-void BasicSynthAudioProcessor::buildPlayMidi (const juce::MidiBuffer& input, int numSamples) noexcept
+void NeonSynthProcessor::buildPlayMidi (const juce::MidiBuffer& input, int numSamples) noexcept
 {
     playMidi.clear();
 
@@ -275,19 +331,48 @@ void BasicSynthAudioProcessor::buildPlayMidi (const juce::MidiBuffer& input, int
         numHeldKeys = 0;   // forget keys held under another mode
 
     // 1. Keyboard input. Layer passes everything through; Replace and Transpose
-    //    keep controllers, pitch bend and so on, but take note messages out of
-    //    the synth's path (Transpose uses them to steer the pattern instead).
+    //    keep controllers, pitch bend and so on, but take note-ons out of the
+    //    synth's path (Transpose uses them to steer the pattern instead).
+    //
+    //    Note-offs reach the synth in every mode: a key pressed in Layer and
+    //    released after switching to Replace or Transpose (or after turning the
+    //    sequencer on) must still stop its voice. juce::Synthesiser ignores a
+    //    note-off for a note that isn't sounding, so this is harmless.
+    //    SysEx is dropped: the synth ignores it, and a large dump could
+    //    outgrow playMidi's preallocated capacity on the audio thread.
+    //
+    //    Keyboard messages are moved to MIDI channel 1, whatever channel they
+    //    arrived on. The sequencer owns channel 16; juce::Synthesiser matches
+    //    note-offs by channel and note, so a keyboard on channel 16 would
+    //    otherwise have its notes cut off by the sequencer playing the same
+    //    pitch. The synth has no per-channel behaviour of its own, so nothing
+    //    else changes (a sustain pedal still holds the keyboard's notes).
     for (const auto event : input)
     {
-        const int  status = event.numBytes >= 3 ? (event.data[0] & 0xf0) : 0;
-        const bool noteOn = status == 0x90 && event.data[2] > 0;
-        const bool isNote = noteOn || status == 0x80 || status == 0x90;
+        if (event.numBytes <= 0 || event.data[0] == 0xf0)
+            continue;   // empty or SysEx
 
-        if (isNote && mode == SequencerMode::transpose)
-            trackHeldKey (event.data[1], noteOn);
+        juce::uint8 bytes[3] = {};
+        const int numBytes = juce::jmin (event.numBytes, 3);
+        std::memcpy (bytes, event.data, (size_t) numBytes);
 
-        if (! isNote || mode == SequencerMode::layer)
-            playMidi.addEvent (event.data, event.numBytes, event.samplePosition);
+        if (event.numBytes <= 3 && bytes[0] >= 0x80 && bytes[0] < 0xf0)
+            bytes[0] = (juce::uint8) ((bytes[0] & 0xf0) | (keyboardChannel - 1));
+
+        const int  status  = numBytes >= 3 ? (bytes[0] & 0xf0) : 0;
+        const bool noteOn  = status == 0x90 && bytes[2] > 0;
+        const bool noteOff = status == 0x80 || (status == 0x90 && bytes[2] == 0);
+
+        if ((noteOn || noteOff) && mode == SequencerMode::transpose)
+            trackHeldKey (bytes[1], noteOn);
+
+        if (! noteOn || mode == SequencerMode::layer)
+        {
+            if (event.numBytes <= 3)
+                playMidi.addEvent (bytes, numBytes, event.samplePosition);
+            else
+                playMidi.addEvent (event.data, event.numBytes, event.samplePosition);   // longer system messages, unchanged
+        }
     }
 
     // 2. Musical time: the host transport when Sync is on and the host reports
@@ -349,11 +434,12 @@ void BasicSynthAudioProcessor::buildPlayMidi (const juce::MidiBuffer& input, int
 //==============================================================================
 // State
 
-void BasicSynthAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
+void NeonSynthProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     // Parameters and GUI state come from the APVTS; the pattern is added as a
     // child tree because its 16 steps are not host parameters.
     auto state = apvts.copyState();
+    state.setProperty (stateVersionId, currentStateVersion, nullptr);
 
     if (auto previous = state.getChildWithName (patternId); previous.isValid())
         state.removeChild (previous, nullptr);
@@ -374,7 +460,7 @@ void BasicSynthAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
         copyXmlToBinary (*xml, destData);
 }
 
-void BasicSynthAudioProcessor::setStateInformation (const void* data, int sizeInBytes)
+void NeonSynthProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
     auto xml = getXmlFromBinary (data, sizeInBytes);
     if (xml == nullptr || ! xml->hasTagName (apvts.state.getType()))
@@ -383,7 +469,11 @@ void BasicSynthAudioProcessor::setStateInformation (const void* data, int sizeIn
     const auto tree = juce::ValueTree::fromXml (*xml);
     apvts.replaceState (tree);
 
-    // Sessions saved before the sequencer existed have no pattern: keep the default.
+    // A state without a pattern (sessions saved before v1.3, or a preset that
+    // only carries parameters) gets the default pattern, so loading it always
+    // sounds the same whatever was loaded before.
+    loadDefaultPattern();
+
     const auto pattern = tree.getChildWithName (patternId);
     for (int i = 0; i < juce::jmin (StepSequencer::numSteps, pattern.getNumChildren()); ++i)
     {
@@ -396,5 +486,5 @@ void BasicSynthAudioProcessor::setStateInformation (const void* data, int sizeIn
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 {
-    return new BasicSynthAudioProcessor();
+    return new NeonSynthProcessor();
 }

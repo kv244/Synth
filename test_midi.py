@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
+# NeonSynth - Copyright (C) 2026 Razvan Julian Petrescu
+# SPDX-License-Identifier: AGPL-3.0-only
+# Licensed under the GNU Affero General Public License v3; see LICENSE.
 """
-BasicSynth automated tests using pedalboard + mido.
+NeonSynth automated tests using pedalboard + mido.
 Loads the VST3 directly — no MIDI ports, loopMIDI, or DAW required.
 
   pip install pedalboard mido numpy sounddevice soundfile
@@ -16,6 +19,8 @@ Save a rendered example to WAV:
 """
 
 import os
+import re
+import struct
 import sys
 import argparse
 import numpy as np
@@ -61,8 +66,8 @@ BLOCK_SIZE  = 512
 # pedalboard requires the inner DLL, not the outer bundle folder
 VST3_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
-    "build", "BasicSynth_artefacts", "Release",
-    "VST3", "BasicSynth.vst3", "Contents", "x86_64-win", "BasicSynth.vst3",
+    "build", "NeonSynth_artefacts", "Release",
+    "VST3", "NeonSynth.vst3", "Contents", "x86_64-win", "NeonSynth.vst3",
 )
 
 # ---------------------------------------------------------------------------
@@ -284,21 +289,18 @@ class SequencerOn:
         return False
 
 
-def onset_times(audio: np.ndarray, frame: int = 64) -> list[float]:
-    """Times (s) where the signal rises out of silence: crude but robust for gated notes."""
-    mono = np.abs(audio[0] + audio[1])
-    frames = len(mono) // frame
-    env = mono[: frames * frame].reshape(frames, frame).max(axis=1)
-    threshold = 0.1 * env.max()
-    quiet_frames_needed = int(0.02 * SAMPLE_RATE / frame)  # 20 ms of quiet before a new onset
-    onsets, quiet = [], quiet_frames_needed
-    for i, level in enumerate(env):
-        if level > threshold:
-            if quiet >= quiet_frames_needed:
-                onsets.append(i * frame / SAMPLE_RATE)
-            quiet = 0
-        else:
-            quiet += 1
+def onset_times(audio: np.ndarray) -> list[float]:
+    """Times (s) of the first non-silent sample after at least 20 ms of digital silence.
+
+    Exact to the sample when notes are separated by true silence (short release),
+    which is how the sequencer timing test sets them up."""
+    loud = np.abs(audio[0]) + np.abs(audio[1]) > 1e-7
+    gap = int(0.02 * SAMPLE_RATE)
+    onsets, last_loud = [], -gap
+    for i in np.flatnonzero(loud):
+        if i - last_loud >= gap:
+            onsets.append(i / SAMPLE_RATE)
+        last_loud = i
     return onsets
 
 
@@ -315,7 +317,7 @@ def test_sequencer_plays(plugin):
 
 
 def test_sequencer_timing(plugin):
-    """At 120 BPM in 1/8 steps, notes start exactly on the pattern's steps (0.25 s apart)."""
+    """At 120 BPM in 1/8 steps, notes start on the pattern's steps (0.25 s apart) to within 2 samples."""
     set_params(plugin, filter_on=False)
     fast_envelope = {
         find_param(plugin, "attack"): 0.0,     # 1 ms
@@ -329,8 +331,276 @@ def test_sequencer_timing(plugin):
     found = onset_times(audio)
     assert len(found) == len(expected), f"Expected {len(expected)} notes, found {len(found)}: {found}"
     worst = max(abs(f - e) for f, e in zip(found, expected))
-    assert worst < 0.005, f"Onsets off by up to {worst * 1000:.1f} ms"
-    return f"{len(found)} notes, worst timing error {worst * 1000:.2f} ms"
+    worst_samples = worst * SAMPLE_RATE
+    assert worst_samples <= 2.0, f"Onsets off by up to {worst_samples:.0f} samples ({worst * 1000:.2f} ms)"
+    return f"{len(found)} notes, worst timing error {worst_samples:.0f} samples ({worst * 1000:.3f} ms)"
+
+
+def test_headroom(plugin):
+    """16 full-velocity square voices plus +6 dB output gain stay under the -1 dBFS ceiling,
+    while a single note (well below the -6 dBFS knee) passes through unclipped."""
+    gain = find_param(plugin, "gain")
+    saved = plugin.parameters[gain].raw_value
+    plugin.parameters[gain].raw_value = 1.0                      # +6 dB, the maximum
+    loud = render(plugin, list(range(48, 64)), velocity=127, waveform=1, cutoff_hz=18000)
+    plugin.parameters[gain].raw_value = saved
+    single = render(plugin, [60], velocity=100, waveform=1, cutoff_hz=18000)
+    ceiling = 10 ** (-1 / 20)
+    peak_loud, peak_single = float(np.abs(loud).max()), float(np.abs(single).max())
+    assert peak_loud <= ceiling + 1e-6, f"Peak {20 * np.log10(peak_loud):+.2f} dBFS exceeds the -1 dBFS ceiling"
+    assert peak_single < 10 ** (-6 / 20), f"Single note peaked at {20 * np.log10(peak_single):+.2f} dBFS, inside the knee"
+    return f"16 voices +6 dB: {20 * np.log10(peak_loud):+.2f} dBFS  single note: {20 * np.log10(peak_single):+.2f} dBFS"
+
+
+def time_to_raw(seconds: float, maximum: float) -> float:
+    """Normalised value of an envelope time parameter (0.001 s .. maximum, skew 0.3)."""
+    return float(((seconds - 0.001) / (maximum - 0.001)) ** 0.3)
+
+
+def max_step(audio: np.ndarray) -> float:
+    """Largest sample-to-sample change on either channel: a click shows up as a big step."""
+    return float(np.abs(np.diff(audio, axis=1)).max())
+
+
+# A full-velocity sine at C4 changes by at most 2*pi*f/fs*A ~ 0.0093 per sample on its own.
+CLICK_THRESHOLD = 0.02
+
+
+class Params:
+    """Context manager: set raw parameter values, restore them afterwards."""
+
+    def __init__(self, plugin, **raw_values):
+        self.plugin, self.raw_values = plugin, raw_values
+
+    def __enter__(self):
+        self.saved = {name: self.plugin.parameters[name].raw_value for name in self.raw_values}
+        for name, value in self.raw_values.items():
+            self.plugin.parameters[name].raw_value = value
+        return self.plugin
+
+    def __exit__(self, *exc):
+        for name, value in self.saved.items():
+            self.plugin.parameters[name].raw_value = value
+        return False
+
+
+def test_release_mid_decay(plugin):
+    """Sustain 0, note released halfway through a 1 s decay: it fades over the release time.
+
+    juce::ADSR (used before v1.4.0) recomputed its release rate from the sustain
+    level on every block, so with Sustain 0 the note stopped dead - a click."""
+    set_params(plugin)
+    with Params(plugin, **{find_param(plugin, "sustain"): 0.0,
+                           find_param(plugin, "decay"): time_to_raw(1.0, 5.0)}):
+        msgs = [mido.Message("note_on", note=60, velocity=127, time=0.0),
+                mido.Message("note_off", note=60, velocity=0, time=0.5)]
+        audio = plugin.process(msgs, 1.2, SAMPLE_RATE, reset=True)
+    off = int(0.5 * SAMPLE_RATE)
+    tail = rms(audio[:, off + int(0.05 * SAMPLE_RATE): off + int(0.15 * SAMPLE_RATE)])   # 50-150 ms after
+    step = max_step(audio)
+    assert tail > 1e-3, f"Note stopped dead at its note-off — tail RMS {tail:.6f}"
+    assert step < CLICK_THRESHOLD, f"Click: a {step:.4f} step between samples"
+    return f"tail RMS={tail:.4f}  largest step={step:.4f}"
+
+
+def test_sustain_change_while_held(plugin):
+    """Turning Sustain from 100% to 20% while a note is held ramps the level instead of jumping."""
+    set_params(plugin)
+    sustain = find_param(plugin, "sustain")
+    with Params(plugin, **{sustain: 1.0}):
+        first = plugin.process([mido.Message("note_on", note=60, velocity=127, time=0.0)],
+                               0.5, SAMPLE_RATE, reset=True)
+        plugin.parameters[sustain].raw_value = 0.2
+        second = plugin.process([], 0.3, SAMPLE_RATE, reset=False)
+    audio = np.concatenate([first, second], axis=1)
+    step = max_step(audio)
+    later = float(np.abs(second[:, int(0.1 * SAMPLE_RATE):]).max())
+    assert step < CLICK_THRESHOLD, f"Click: a {step:.4f} step when Sustain changed"
+    assert later < 0.25 * 0.3, f"Level did not follow the new sustain (peak {later:.3f})"
+    return f"largest step={step:.4f}  peak after the change={later:.3f}"
+
+
+JUCE_XML_MAGIC = 0x21324356   # header of juce::AudioProcessor::copyXmlToBinary ("VC2!")
+JUCE_BASE64 = ".ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+"
+
+
+def juce_xml_from_binary(data: bytes) -> tuple[str, bytes]:
+    """Split a copyXmlToBinary block into (xml text, bytes that follow it)."""
+    magic, length = struct.unpack("<II", data[:8])
+    assert magic == JUCE_XML_MAGIC, "not a JUCE binary XML block"
+    return data[8:8 + length].rstrip(b"\0").decode("utf-8"), data[8 + length:]
+
+
+def juce_xml_to_binary(xml: str) -> bytes:
+    text = xml.encode("utf-8") + b"\0"
+    return struct.pack("<II", JUCE_XML_MAGIC, len(text)) + text
+
+
+def juce_base64_decode(text: str) -> bytes:
+    """juce::MemoryBlock::fromBase64Encoding: "<size>.<chars>", 6 bits per char, least significant first."""
+    size, chars = text.split(".", 1)
+    n = sum(JUCE_BASE64.index(c) << (6 * i) for i, c in enumerate(chars))
+    return n.to_bytes(int(size), "little")
+
+
+def juce_base64_encode(data: bytes) -> str:
+    n = int.from_bytes(data, "little")
+    return f"{len(data)}." + "".join(JUCE_BASE64[(n >> (6 * i)) & 63] for i in range((len(data) * 8 + 5) // 6))
+
+
+def state_xml(plugin) -> str:
+    """The plugin's own saved state (what getStateInformation wrote), as XML text.
+
+    pedalboard wraps a VST3's state as <VST3PluginState><IComponent>base64</IComponent>...,
+    and JUCE's VST3 wrapper appends its private data after the plugin's block."""
+    outer, _ = juce_xml_from_binary(plugin.raw_state)
+    component = re.search(r"<IComponent>([^<]*)</IComponent>", outer).group(1)
+    inner, _ = juce_xml_from_binary(juce_base64_decode(component))
+    return inner
+
+
+def load_state_xml(plugin, xml: str):
+    """Replace the plugin's own state with `xml`, keeping pedalboard's and JUCE's wrapping."""
+    outer, _ = juce_xml_from_binary(plugin.raw_state)
+    component = re.search(r"<IComponent>([^<]*)</IComponent>", outer).group(1)
+    _, private = juce_xml_from_binary(juce_base64_decode(component))
+    encoded = juce_base64_encode(juce_xml_to_binary(xml) + private)
+    plugin.raw_state = juce_xml_to_binary(outer.replace(component, encoded))
+
+
+def sequencer_onsets(plugin) -> int:
+    """Number of notes the sequencer plays in 4 s at 1/8, 120 BPM: the 16-step pattern once."""
+    set_params(plugin, filter_on=False)
+    fast = {find_param(plugin, "attack"): 0.0, find_param(plugin, "release"): 0.0,
+            find_param(plugin, "sequencer", "rate"): 0.0}
+    with SequencerOn(plugin, **fast):
+        audio = plugin.process([], 4.0, SAMPLE_RATE, reset=True)
+    return len(onset_times(audio))
+
+
+def test_state_round_trip(plugin):
+    """The pattern is saved in the state and restored; a state without one loads the default."""
+    xml = state_xml(plugin)
+    assert 'stateVersion="2"' in xml, "state has no stateVersion attribute"
+    assert "<Pattern>" in xml, "state has no pattern"
+
+    # Only step 0 on: one note per pass through the pattern
+    def step(i):
+        return f'<Step on="{1 if i == 0 else 0}" note="60" velocity="100"/>'
+    single = xml[:xml.index("<Pattern>")] + "<Pattern>" + "".join(step(i) for i in range(16)) + \
+        xml[xml.index("</Pattern>"):]
+    load_state_xml(plugin, single)
+    one_step = sequencer_onsets(plugin)
+
+    # Same state with the pattern removed: back to the default pattern (12 steps on)
+    without = xml[:xml.index("<Pattern>")] + xml[xml.index("</Pattern>") + len("</Pattern>"):]
+    load_state_xml(plugin, single)
+    load_state_xml(plugin, without)
+    default = sequencer_onsets(plugin)
+    load_state_xml(plugin, xml)
+
+    assert one_step == 1, f"Edited pattern did not load: {one_step} notes, expected 1"
+    assert default == len(DEFAULT_PATTERN_ON_STEPS), \
+        f"State without a pattern kept the previous one: {default} notes, expected {len(DEFAULT_PATTERN_ON_STEPS)}"
+    return f"one-step pattern: {one_step} note  no pattern: {default} notes (default)"
+
+
+def test_keyboard_on_sequencer_channel(plugin):
+    """A keyboard note on MIDI channel 16 survives the sequencer playing the same pitch.
+
+    The sequencer plays on channel 16. Before v1.4.0 a keyboard sending on
+    channel 16 shared it, so the sequencer's C3 note-off also stopped a held
+    keyboard C3.
+
+    The keyboard note starts 10 ms after the step. Through pedalboard's VST3
+    host, a host note-on landing on the very sample of a sequencer note-on of
+    the same pitch never reaches the synth; driving processBlock directly, the
+    plugin plays both, so that case is a host artefact, not a plugin bug."""
+    original = state_xml(plugin)
+    set_params(plugin)
+    with SequencerOn(plugin):
+        xml = state_xml(plugin)
+        steps = "".join(f'<Step on="{1 if i == 0 else 0}" note="48" velocity="100"/>' for i in range(16))
+        load_state_xml(plugin, xml[:xml.index("<Pattern>")] + "<Pattern>" + steps + xml[xml.index("</Pattern>"):])
+        held = [mido.Message("note_on", channel=15, note=48, velocity=100, time=0.01)]   # mido channel 15 = MIDI 16
+        audio = plugin.process(held, 1.5, SAMPLE_RATE, reset=True)
+    load_state_xml(plugin, original)
+    # The sequencer's step-0 C3 ends after 62.5 ms plus a 300 ms release; the
+    # held keyboard C3 must still sound well after that.
+    later = rms(audio[:, int(0.6 * SAMPLE_RATE):])
+    assert later > 1e-3, f"Keyboard note on channel 16 was cut off by the sequencer — RMS {later:.6f}"
+    return f"held note RMS after the sequencer note ended={later:.4f}"
+
+
+def test_midi_log_per_instance(plugin):
+    """Two plugin instances logging MIDI write two separate files instead of fighting over one."""
+    import gc
+    import glob
+    import tempfile
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as folder:
+        base = os.path.join(folder, "midi.log")
+        previous = os.environ.get("NEONSYNTH_MIDILOG")
+        os.environ["NEONSYNTH_MIDILOG"] = base
+        try:
+            first, second = load_plugin(), load_plugin()
+        finally:
+            if previous is None:
+                del os.environ["NEONSYNTH_MIDILOG"]
+            else:
+                os.environ["NEONSYNTH_MIDILOG"] = previous
+        first.process([mido.Message("note_on", note=60, velocity=100, time=0.0)], 0.2, SAMPLE_RATE, reset=True)
+        second.process([mido.Message("note_on", note=72, velocity=100, time=0.0)], 0.2, SAMPLE_RATE, reset=True)
+        del first, second
+        gc.collect()   # the plugins' destructors flush and close their logs
+        # pedalboard creates extra probe instances while loading, which open
+        # (empty) logs of their own, so only the logs that saw a note count.
+        logs = sorted(glob.glob(os.path.join(folder, "midi*.log")))
+        played = [(os.path.basename(f), open(f).read()) for f in logs]
+        played = [(name, text) for name, text in played if "Note on" in text]
+    assert len(played) == 2, f"Expected two logs with a note, found {[name for name, _ in played]} among {len(logs)} logs"
+    assert all(text.count("Note on") == 1 for _, text in played), "Each log should hold exactly its own instance's note"
+    return "two instances wrote " + " and ".join(name for name, _ in played)
+
+
+def test_close_events_sample_accurate(plugin):
+    """Two notes 20 samples apart in the same block each start on their own sample.
+
+    juce::Synthesiser's default handles events less than 32 samples after the
+    previous one together, so before v1.4.0 the second note started 20 samples
+    early. With Width at 100%, C2 is hard left (silent on the right) and C6 hard
+    right, so the right channel's first sample is the second note's start."""
+    set_params(plugin)
+    width = find_param(plugin, "width")
+    saved = plugin.parameters[width].raw_value
+    plugin.parameters[width].raw_value = 1.0
+    first, second = 4410, 4430                      # samples
+    msgs = [mido.Message("note_on", note=36, velocity=100, time=first / SAMPLE_RATE),
+            mido.Message("note_on", note=84, velocity=100, time=second / SAMPLE_RATE)]
+    audio = plugin.process(msgs, 0.3, SAMPLE_RATE, reset=True)
+    plugin.parameters[width].raw_value = saved
+    start_left = int(np.flatnonzero(np.abs(audio[0]) > 1e-7)[0])
+    start_right = int(np.flatnonzero(np.abs(audio[1]) > 1e-7)[0])
+    assert abs(start_left - first) <= 1, f"First note started at sample {start_left}, expected {first}"
+    assert abs(start_right - second) <= 1, f"Second note started at sample {start_right}, expected {second}"
+    return f"notes at samples {start_left} and {start_right} (expected {first}, {second})"
+
+
+def test_no_stuck_note_on_mode_change(plugin):
+    """A key pressed in Layer and released after switching to Transpose must still stop.
+
+    Before v1.4.0 the note-off was filtered out with the note-ons, so the voice
+    sustained forever. Transpose with no key held plays nothing, so any sound
+    after the release time is the stuck keyboard note."""
+    set_params(plugin)
+    plugin.process([mido.Message("note_on", note=60, velocity=100, time=0.0)],
+                   0.5, SAMPLE_RATE, reset=True)                       # Layer, sequencer off: key down
+    mode = find_param(plugin, "sequencer", "mode")
+    with SequencerOn(plugin, **{mode: 1.0}):                          # Transpose (last choice)
+        audio = plugin.process([mido.Message("note_off", note=60, velocity=0, time=0.0)],
+                               1.5, SAMPLE_RATE, reset=False)          # key up after the switch
+    after_release = rms(audio[:, int(0.8 * SAMPLE_RATE):])             # release is 300 ms by default
+    assert after_release < 1e-5, f"Note still sounding after its note-off — RMS {after_release:.6f}"
+    return f"RMS after release={after_release:.7f}"
 
 
 # ---------------------------------------------------------------------------
@@ -348,6 +618,14 @@ TESTS = [
     ("Velocity scaling",  test_velocity_scaling),
     ("Sequencer plays",   test_sequencer_plays),
     ("Sequencer timing",  test_sequencer_timing),
+    ("No stuck note",     test_no_stuck_note_on_mode_change),
+    ("Close events",      test_close_events_sample_accurate),
+    ("Headroom",          test_headroom),
+    ("Release mid-decay", test_release_mid_decay),
+    ("Sustain change",    test_sustain_change_while_held),
+    ("State round trip",  test_state_round_trip),
+    ("Channel 16 key",    test_keyboard_on_sequencer_channel),
+    ("Log per instance",  test_midi_log_per_instance),
 ]
 
 
@@ -374,7 +652,7 @@ def demo_render(plugin) -> np.ndarray:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="BasicSynth test suite")
+    parser = argparse.ArgumentParser(description="NeonSynth test suite")
     parser.add_argument("--play", action="store_true",
                         help="render a demo and play it through speakers")
     parser.add_argument("--save", metavar="FILE",
@@ -391,7 +669,7 @@ def main():
 
     if args.midilog:
         # The plugin reads this when it is constructed, so set it before loading.
-        os.environ["BASICSYNTH_MIDILOG"] = os.path.abspath(args.midilog)
+        os.environ["NEONSYNTH_MIDILOG"] = os.path.abspath(args.midilog)
 
     if not os.path.exists(VST3_PATH):
         sys.exit(

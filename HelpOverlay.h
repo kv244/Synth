@@ -1,3 +1,7 @@
+// NeonSynth - Copyright (C) 2026 Razvan Julian Petrescu
+// SPDX-License-Identifier: AGPL-3.0-only
+// Licensed under the GNU Affero General Public License v3; see LICENSE.
+
 #pragma once
 #include <JuceHeader.h>
 #include "Visualisers.h"
@@ -105,7 +109,7 @@ private:
         // Left column: the step sequencer.
         addSection (columns[0], { "STEP SEQUENCER", {
             "RUN starts and stops the pattern.",
-            "SYNC follows your DAW's tempo and transport. In the Standalone, or with SYNC off, TEMPO sets the speed.",
+            "SYNC follows your DAW's tempo and transport: press play in the DAW to hear it. In the Standalone, or with SYNC off, TEMPO sets the speed.",
             "Rate is the step length: 1/16 = four steps per beat, T = triplets.",
             "SWING delays every second step. GATE sets how long each note lasts." } }, neon::amber);
 

@@ -1,3 +1,7 @@
+// NeonSynth - Copyright (C) 2026 Razvan Julian Petrescu
+// SPDX-License-Identifier: AGPL-3.0-only
+// Licensed under the GNU Affero General Public License v3; see LICENSE.
+
 #pragma once
 #include <juce_audio_basics/juce_audio_basics.h>
 
@@ -30,6 +34,19 @@
     accumulated), the pattern stays locked to the host's bar grid, and rate
     or tempo changes take effect on the next step without drift.
 
+    Transport continuity
+    --------------------
+    Hosts don't advance their beat position perfectly: a tempo change in the
+    middle of a block, a tempo ramp with large buffers, or rounding in the
+    host can move the next block's start by a few samples from where this
+    block predicted. Drift up to jumpToleranceSeconds (2 ms) either way is
+    treated as continuous playback: nothing is released, and the last step
+    that fired is remembered so a small backward drift never fires it twice
+    and a small forward drift never skips one (a step that would fall just
+    before the block fires at sample 0 instead). Anything larger is a jump
+    (a loop, a locate): held notes are released and timing restarts from the
+    new position.
+
     Note-offs
     ---------
     Every note-on schedules a note-off `gate * stepLength` later. Those can
@@ -47,13 +64,17 @@
 
     Notes are sent on MIDI channel 16 so they can never cancel a note of the
     same pitch played on the keyboard (juce::Synthesiser matches note-offs by
-    channel as well as note number).
+    channel as well as note number). The processor moves all keyboard input to
+    channel 1, so this holds whatever channel the keyboard sends on.
 */
 class StepSequencer
 {
 public:
     static constexpr int numSteps    = 16;
     static constexpr int midiChannel = 16;
+
+    /** Transport drift up to this much (either way) is not treated as a jump. */
+    static constexpr double jumpToleranceSeconds = 0.002;
 
     //==========================================================================
     /** One step of the pattern. */
@@ -117,6 +138,7 @@ public:
         sampleRate = newSampleRate > 0.0 ? newSampleRate : 44100.0;
         numPending = 0;
         wasPlaying = false;
+        lastFiredBeat = noStepFired;
         currentStep.store (-1, std::memory_order_relaxed);
     }
 
@@ -161,6 +183,7 @@ public:
         {
             releaseAll (midi, 0);
             wasPlaying = false;
+            lastFiredBeat = noStepFired;
             currentStep.store (-1, std::memory_order_relaxed);
             return;
         }
@@ -169,10 +192,20 @@ public:
         const double blockStart     = transport.beat;
         const double blockEnd       = blockStart + (double) numSamples / samplesPerBeat;
 
-        // A jump in time (host loop, locate, or just started) releases held notes
-        // so a note never hangs across the discontinuity.
-        if (wasPlaying && std::abs (blockStart - expectedBeat) > 0.5 / samplesPerBeat + 1.0e-9)
-            releaseAll (midi, 0);
+        // Continuous playback, or a jump in time? Small drift is tolerated (see
+        // "Transport continuity" above); a real jump (host loop, locate) releases
+        // held notes so nothing hangs across the discontinuity. Just starting is
+        // neither: there is nothing to release and no step has fired yet.
+        const double toleranceSamples = jumpToleranceSeconds * sampleRate;
+        const bool   continuous = wasPlaying
+                               && std::abs (blockStart - expectedBeat) * samplesPerBeat <= toleranceSamples;
+
+        if (! continuous)
+        {
+            if (wasPlaying)
+                releaseAll (midi, 0);
+            lastFiredBeat = noStepFired;
+        }
 
         wasPlaying   = true;
         expectedBeat = blockEnd;
@@ -182,8 +215,9 @@ public:
         const int    gateSamples = juce::jmax (1, (int) std::lround ((double) juce::jlimit (0.05f, 1.0f, settings.gate)
                                                                      * stepLength * samplesPerBeat));
 
-        // Candidate steps: start one early so a swung odd step from just before
-        // the block is not missed, and stop once a step starts after the block.
+        // Candidate steps: start early enough to catch a swung odd step, or a step
+        // skipped by forward drift, from just before the block; stop once a step
+        // starts after the block.
         //
         // A step fires on the first whole sample at or after its exact position:
         // offset = ceil (distance in samples). Deciding on integer offsets (rather
@@ -192,17 +226,37 @@ public:
         // absorbs floating-point error such as 5999.9999999 for 6000.
         constexpr double epsilon = 1.0e-6;
 
-        for (auto k = (juce::int64) std::floor (blockStart / stepLength) - 1; ; ++k)
+        const double firstCandidate = blockStart - (continuous ? toleranceSamples / samplesPerBeat : 0.0);
+
+        for (auto k = (juce::int64) std::floor (firstCandidate / stepLength) - 1; ; ++k)
         {
             const bool   odd      = (k & 1) != 0;
             const double stepBeat = (double) k * stepLength + (odd ? swingDelay : 0.0);
             const double distance = (stepBeat - blockStart) * samplesPerBeat;   // in samples, may be fractional
-            const auto   offset   = (juce::int64) std::ceil (distance - epsilon);
+            auto         offset   = (juce::int64) std::ceil (distance - epsilon);
 
             if (offset >= numSamples)
                 break;
-            if (offset < 0)
-                continue;
+
+            if (continuous)
+            {
+                // Already fired (it can reappear after a small backward drift)?
+                if (stepBeat <= lastFiredBeat + epsilon / samplesPerBeat)
+                    continue;
+                // Skipped by a small forward drift: fire it now rather than never.
+                if (offset < 0)
+                {
+                    if ((double) -offset > toleranceSamples)
+                        continue;
+                    offset = 0;
+                }
+            }
+            else if (offset < 0)
+            {
+                continue;   // started (or jumped) after this step: don't play it late
+            }
+
+            lastFiredBeat = stepBeat;
 
             const int index = (int) (((k % numSteps) + numSteps) % numSteps);
             currentStep.store (index, std::memory_order_relaxed);
@@ -309,4 +363,7 @@ private:
     double sampleRate   = 44100.0;
     double expectedBeat = 0.0;
     bool   wasPlaying   = false;
+
+    static constexpr double noStepFired = -1.0e300;
+    double lastFiredBeat = noStepFired;   ///< beat of the most recent step that fired, while playing continuously
 };
