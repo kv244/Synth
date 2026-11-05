@@ -628,6 +628,43 @@ def test_sample_pitch(plugin):
     return "  ".join(f"{n}: {f:.1f} Hz" for n, f in found.items()) + "  one-shot ends"
 
 
+def test_granular(plugin):
+    """Source = Granular plays a cloud of grains, pitched by the key, and repeats exactly.
+
+    A C4 sine is loaded through the state. C5 played on the granular source
+    must peak at 523 Hz, and two renders of the same MIDI (after a reset)
+    must be identical: the grains are random but seeded."""
+    import tempfile
+    from xml.sax.saxutils import quoteattr
+    original = state_xml(plugin)
+    saved = {name: p.raw_value for name, p in plugin.parameters.items()}
+    try:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as folder:
+            wav = os.path.join(folder, "c4.wav")
+            write_test_wav(wav, seconds=2.0, hz=261.6256)
+            load_state_xml(plugin, with_sample_element(original, f'<Sample name="c4.wav" path={quoteattr(wav)}/>'))
+
+        set_params(plugin, filter_on=False)
+        plugin.parameters["source"].raw_value = 1.0                     # Granular
+        plugin.parameters["sample_root"].raw_value = 60 / 127
+        plugin.parameters[find_param(plugin, "grain", "spray")].raw_value = 0.3
+        plugin.parameters[find_param(plugin, "grain", "jitter")].raw_value = 0.2   # 20 cents
+        msgs = [mido.Message("note_on", note=72, velocity=100, time=0.0)]
+        first = plugin.process(msgs, 1.5, SAMPLE_RATE, reset=True)
+        second = plugin.process(msgs, 1.5, SAMPLE_RATE, reset=True)
+        level = rms(first[:, int(0.3 * SAMPLE_RATE):])
+        pitch = peak_frequency(first[:, int(0.3 * SAMPLE_RATE):])
+        assert level > 1e-2, f"granular source is silent (RMS {level:.5f})"
+        assert abs(pitch / 523.25 - 1) < 0.01, f"C5 on the granular source peaks at {pitch:.1f} Hz, expected 523.3"
+        difference = float(np.max(np.abs(first - second)))
+        assert difference == 0.0, f"two renders of the same MIDI differ by up to {difference:.3g}: grains are not seeded"
+    finally:
+        for name, value in saved.items():
+            plugin.parameters[name].raw_value = value
+        load_state_xml(plugin, original)
+    return f"RMS {level:.3f}  peak {pitch:.1f} Hz  repeat renders identical"
+
+
 def test_keyboard_on_sequencer_channel(plugin):
     """A keyboard note on MIDI channel 16 survives the sequencer playing the same pitch.
 
@@ -749,6 +786,7 @@ TESTS = [
     ("State round trip",  test_state_round_trip),
     ("Sample state",      test_sample_state),
     ("Sample pitch",      test_sample_pitch),
+    ("Granular",          test_granular),
     ("Channel 16 key",    test_keyboard_on_sequencer_channel),
     ("Log per instance",  test_midi_log_per_instance),
 ]

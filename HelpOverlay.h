@@ -126,7 +126,7 @@ private:
 
         // Right column: the synth and getting sound out.
         addSection (columns[1], { "SOUND", {
-            "SOURCE: the oscillator (with its Waveform) or the loaded sample.",
+            "SOURCE: the oscillator (with its Waveform), the loaded sample, or Granular: a cloud of short grains of it.",
             "ENVELOPE: attack, decay, sustain and release of every note.",
             "FILTER: low-pass cutoff; ON switches it in.",
             "GAIN: output level. WIDTH: stereo spread of the voices.",
@@ -136,6 +136,10 @@ private:
             "LOAD a WAV, AIFF or FLAC file, or drop one anywhere on the synth. PAD goes back to the built-in pad.",
             "ROOT is the key that plays the file at its own pitch. Drag the cyan line to set the start and the amber brackets to set the loop.",
             "One-shot plays to the end; Loop loops while the note sounds; Loop until release loops while the key is held. XFADE smooths the loop point." } }, neon::cyan);
+
+        addSection (columns[1], { "GRANULAR", {
+            "POS places the cloud in the sample (or drag on the waveform); SCAN moves it, 0 freezes it. SIZE and DENS set grain length and grains per second.",
+            "SPRAY scatters the grains around POS; JITTER detunes each one. ROOT works as for Sample." } }, neon::magenta);
 
         addSection (columns[1], { "PLAYING NOTES", {
             "MIDI keyboard in the Standalone: Options > Audio/MIDI Settings, then tick it under MIDI inputs.",

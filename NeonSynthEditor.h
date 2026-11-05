@@ -60,6 +60,12 @@ public:
         smpLoopStartValue = apvts.getRawParameterValue ("smpLoopStart");
         smpLoopEndValue  = apvts.getRawParameterValue ("smpLoopEnd");
         smpXfadeValue    = apvts.getRawParameterValue ("smpXfade");
+        grPosValue       = apvts.getRawParameterValue ("grPos");
+        grScanValue      = apvts.getRawParameterValue ("grScan");
+        grSizeValue      = apvts.getRawParameterValue ("grSize");
+        grDensityValue   = apvts.getRawParameterValue ("grDensity");
+        grSprayValue     = apvts.getRawParameterValue ("grSpray");
+        grJitterValue    = apvts.getRawParameterValue ("grJitter");
 
         // ── Oscillator ───────────────────────────────────────────────────────
         addAndMakeVisible (waveformCombo);
@@ -123,13 +129,48 @@ public:
         smpRootKnob.setTooltip ("Root: the key at which the sample plays at its own pitch");
         smpXfadeKnob.setTooltip ("Loop crossfade length");
 
-        for (auto* label : { &smpRootReadout, &smpStartReadout, &smpLoopStartReadout, &smpLoopEndReadout, &smpXfadeReadout })
-            setUpReadout (*label, neon::cyan, juce::Justification::centred);
+        const std::pair<juce::Slider*, const char*> grainKnobs[] = {
+            { &grPosKnob, "grPos" }, { &grScanKnob, "grScan" }, { &grSizeKnob, "grSize" },
+            { &grDensityKnob, "grDensity" }, { &grSprayKnob, "grSpray" }, { &grJitterKnob, "grJitter" } };
+        for (size_t i = 0; i < std::size (grainKnobs); ++i)
+        {
+            auto* knob = grainKnobs[i].first;
+            knob->setSliderStyle (juce::Slider::Rotary);
+            knob->setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
+            knob->setColour (juce::Slider::rotarySliderFillColourId,    neon::magenta);
+            knob->setColour (juce::Slider::rotarySliderOutlineColourId, neon::magenta.withAlpha (0.3f));
+            knob->setColour (juce::Slider::thumbColourId,               neon::magenta);
+            addChildComponent (knob);
+            grainKnobAttachments[i] = std::make_unique<SliderAttachment> (apvts, grainKnobs[i].second, *knob);
+        }
+        grPosKnob.setTooltip ("Position: where in the sample the cloud sits (or drag the magenta line on the waveform)");
+        grScanKnob.setTooltip ("Scan: how fast the cloud moves through the sample, in either direction; 0 freezes it");
+        grSizeKnob.setTooltip ("Size: length of each grain");
+        grDensityKnob.setTooltip ("Density: grains started per second");
+        grSprayKnob.setTooltip ("Spray: how far each grain may start from the cloud's position");
+        grJitterKnob.setTooltip ("Pitch jitter: random detune of each grain, in cents");
 
-        // Waveform only applies to the oscillator: dim it while another source plays.
+        for (auto* label : { &smpRootReadout, &smpStartReadout, &smpLoopStartReadout, &smpLoopEndReadout, &smpXfadeReadout,
+                             &grPosReadout, &grScanReadout, &grSizeReadout, &grDensityReadout, &grSprayReadout, &grJitterReadout })
+            setUpReadout (*label, neon::cyan, juce::Justification::centred);
+        for (auto* label : { &grPosReadout, &grScanReadout, &grSizeReadout, &grDensityReadout, &grSprayReadout, &grJitterReadout })
+            label->setColour (juce::Label::textColourId, neon::magenta);
+
+        // Waveform only applies to the oscillator, the loop mode only to Sample, and the
+        // knob row follows the source: Sample's knobs, or Granular's.
         sourceListener = std::make_unique<juce::ParameterAttachment> (
             *apvts.getParameter ("source"),
-            [this] (float value) { waveformCombo.setAlpha ((int) value == 0 ? 1.0f : 0.45f); });
+            [this] (float value)
+            {
+                const int source = juce::roundToInt (value);
+                waveformCombo.setAlpha (source == 0 ? 1.0f : 0.45f);
+                smpLoopCombo.setAlpha (source == 2 ? 0.45f : 1.0f);
+                if (std::exchange (granularShown, source == 2) != granularShown && getWidth() > 0)
+                {
+                    resized();
+                    repaint();
+                }
+            });
         sourceListener->sendInitialUpdate();
 
         // ── Envelope ─────────────────────────────────────────────────────────
@@ -347,12 +388,20 @@ public:
         place (sampleStatusLabel, 586, 403, 154, 16);
         place (sampleView,        30, 428, 390, 62);
 
-        juce::Slider* sampleKnobs[] = { &smpRootKnob, &smpStartKnob, &smpLoopStartKnob, &smpLoopEndKnob, &smpXfadeKnob };
-        juce::Label*  sampleReads[] = { &smpRootReadout, &smpStartReadout, &smpLoopStartReadout, &smpLoopEndReadout, &smpXfadeReadout };
-        for (int i = 0; i < 5; ++i)
+        for (const auto& slot : allKnobSlots())
         {
-            place (*sampleKnobs[i], (float) sampleKnobX (i), 426, 58, 38);
-            place (*sampleReads[i], (float) sampleKnobX (i), 478, 58, 12);
+            slot.knob->setVisible (false);
+            slot.readout->setVisible (false);
+        }
+        const auto row = knobRow();
+        for (size_t i = 0; i < row.size(); ++i)
+        {
+            const auto x = (float) rowKnobX ((int) i, (int) row.size());
+            const auto w = (float) knobWidth ((int) row.size());
+            place (*row[i].knob,    x, 426, w, 38);
+            place (*row[i].readout, x, 478, w, 12);
+            row[i].knob->setVisible (true);
+            row[i].readout->setVisible (true);
         }
 
         // Sequencer strip
@@ -374,7 +423,8 @@ public:
         for (auto* label : { &attackReadout, &decayReadout, &sustainReadout, &releaseReadout,
                              &cutoffReadout, &gainReadout, &widthReadout,
                              &seqTempoReadout, &seqSwingReadout, &seqGateReadout, &sampleNameLabel, &sampleStatusLabel,
-                             &smpRootReadout, &smpStartReadout, &smpLoopStartReadout, &smpLoopEndReadout, &smpXfadeReadout })
+                             &smpRootReadout, &smpStartReadout, &smpLoopStartReadout, &smpLoopEndReadout, &smpXfadeReadout,
+                             &grPosReadout, &grScanReadout, &grSizeReadout, &grDensityReadout, &grSprayReadout, &grJitterReadout })
             label->setFont (neon::font (11.0f * s));
     }
 
@@ -413,9 +463,12 @@ public:
         g.setFont (neon::font (13.0f));
         g.drawText ("SAMPLE", 30, 401, 70, 20, juce::Justification::left);
         g.setFont (neon::font (11.0f));
-        const char* sampleNames[] = { "ROOT", "START", "L.START", "L.END", "XFADE" };
-        for (int i = 0; i < 5; ++i)
-            g.drawText (sampleNames[i], sampleKnobX (i), 465, 58, 13, juce::Justification::centred);
+        const auto row = knobRow();
+        for (size_t i = 0; i < row.size(); ++i)
+        {
+            g.setColour (row[i].knob == &smpRootKnob || ! granularShown ? neon::cyan : neon::magenta);
+            g.drawText (row[i].name, rowKnobX ((int) i, (int) row.size()), 465, knobWidth ((int) row.size()), 13, juce::Justification::centred);
+        }
 
         // Sequencer strip
         g.setColour (neon::amber.withAlpha (0.25f));
@@ -447,7 +500,36 @@ private:
 
     float scale() const noexcept { return (float) getWidth() / (float) baseWidth; }
 
-    static int sampleKnobX (int i) noexcept   { return 430 + 62 * i; }
+    // The knob row of the sample strip: Sample's five knobs, or Granular's seven (sharing ROOT).
+    struct KnobSlot { juce::Slider* knob; juce::Label* readout; const char* name; };
+
+    std::vector<KnobSlot> knobRow()
+    {
+        if (granularShown)
+            return { { &smpRootKnob, &smpRootReadout, "ROOT" }, { &grPosKnob, &grPosReadout, "POS" },
+                     { &grScanKnob, &grScanReadout, "SCAN" }, { &grSizeKnob, &grSizeReadout, "SIZE" },
+                     { &grDensityKnob, &grDensityReadout, "DENS" }, { &grSprayKnob, &grSprayReadout, "SPRAY" },
+                     { &grJitterKnob, &grJitterReadout, "JITTER" } };
+
+        return { { &smpRootKnob, &smpRootReadout, "ROOT" }, { &smpStartKnob, &smpStartReadout, "START" },
+                 { &smpLoopStartKnob, &smpLoopStartReadout, "L.START" }, { &smpLoopEndKnob, &smpLoopEndReadout, "L.END" },
+                 { &smpXfadeKnob, &smpXfadeReadout, "XFADE" } };
+    }
+
+    std::vector<KnobSlot> allKnobSlots()
+    {
+        auto all = knobRow();
+        granularShown = ! granularShown;
+        const auto other = knobRow();
+        granularShown = ! granularShown;
+        all.insert (all.end(), other.begin(), other.end());
+        return all;
+    }
+
+    /** 5 knobs at 62 apart, or 7 at 44 apart, from x = 430 to 740. */
+    static int knobSpacing (int count) noexcept   { return count > 5 ? 44 : 62; }
+    static int knobWidth (int count) noexcept     { return knobSpacing (count) - 4; }
+    static int rowKnobX (int i, int count) noexcept { return 430 + knobSpacing (count) * i; }
 
     /** name + details, with the name shortened ("...") so the details always fit the label. */
     juce::String fitSampleName (const juce::String& name, const juce::String& details) const
@@ -580,6 +662,14 @@ private:
         set (smpLoopEndReadout,   percent (smpLoopEndValue->load()));
         set (smpXfadeReadout,     juce::String (juce::roundToInt (smpXfadeValue->load())) + " ms");
 
+        const float scan = grScanValue->load();
+        set (grPosReadout,     percent (grPosValue->load()));
+        set (grScanReadout,    scan == 0.0f ? juce::String ("frozen") : (scan > 0.0f ? "+" : "") + juce::String (scan, 2) + "x");
+        set (grSizeReadout,    juce::String (juce::roundToInt (grSizeValue->load())) + " ms");
+        set (grDensityReadout, juce::String (juce::roundToInt (grDensityValue->load())) + "/s");
+        set (grSprayReadout,   percent (grSprayValue->load()));
+        set (grJitterReadout,  juce::String (juce::roundToInt (grJitterValue->load())) + " ct");
+
         const auto status = processor.getSampleStatus();
         // Re-fitted only when the text or the label's size changes (it measures glyphs).
         const auto details = "  " + juce::String (status.seconds, 1) + " s  " + formatSampleRate (status.sampleRate);
@@ -646,6 +736,12 @@ private:
     std::atomic<float>* smpLoopStartValue = nullptr;
     std::atomic<float>* smpLoopEndValue = nullptr;
     std::atomic<float>* smpXfadeValue = nullptr;
+    std::atomic<float>* grPosValue = nullptr;
+    std::atomic<float>* grScanValue = nullptr;
+    std::atomic<float>* grSizeValue = nullptr;
+    std::atomic<float>* grDensityValue = nullptr;
+    std::atomic<float>* grSprayValue = nullptr;
+    std::atomic<float>* grJitterValue = nullptr;
 
     // Visualisers and their data
     SignalHistory    history;
@@ -681,6 +777,10 @@ private:
     juce::Slider     smpRootKnob, smpStartKnob, smpLoopStartKnob, smpLoopEndKnob, smpXfadeKnob;
     juce::Label      smpRootReadout, smpStartReadout, smpLoopStartReadout, smpLoopEndReadout, smpXfadeReadout;
     std::array<std::unique_ptr<SliderAttachment>, 5> sampleKnobAttachments;
+    juce::Slider     grPosKnob, grScanKnob, grSizeKnob, grDensityKnob, grSprayKnob, grJitterKnob;
+    juce::Label      grPosReadout, grScanReadout, grSizeReadout, grDensityReadout, grSprayReadout, grJitterReadout;
+    std::array<std::unique_ptr<SliderAttachment>, 6> grainKnobAttachments;
+    bool granularShown = false;   // the knob row shows Granular's knobs
     std::unique_ptr<juce::FileChooser> chooser;
     juce::String fittedFor;      // the sample label's last unshortened text, and the width it was fitted to
     int fittedWidth = -1;

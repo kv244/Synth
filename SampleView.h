@@ -15,6 +15,9 @@
     - Drag a marker to move it; click anywhere else to set Start there.
       Markers are parameters, so the drag is one undoable, automatable gesture.
     - A thin white line per voice playing the sample shows where it reads.
+    - With Source = Granular it shows the cloud instead: Position (magenta
+      line, draggable), the band Spray can reach, and a tick per sounding
+      grain (up to 8 per voice).
 
     refresh() is called by the editor's 30 Hz timer; it repaints only when
     something shown has changed. Message thread only.
@@ -31,7 +34,10 @@ public:
         loopEndValue   = apvts.getRawParameterValue ("smpLoopEnd");
         loopModeValue  = apvts.getRawParameterValue ("smpLoop");
         sourceValue    = apvts.getRawParameterValue ("source");
-        setTooltip ("Drag the cyan line (start) or the amber brackets (loop). Click to set the start. Drop a WAV, AIFF or FLAC file anywhere on the synth to load it.");
+        grainPosValue  = apvts.getRawParameterValue ("grPos");
+        grainSprayValue = apvts.getRawParameterValue ("grSpray");
+        setTooltip ("Sample: drag the cyan line (start) or the amber brackets (loop); click to set the start. "
+                    "Granular: drag to move the cloud (magenta line). Drop a WAV, AIFF or FLAC file anywhere on the synth to load it.");
     }
 
     /** Re-reads the sample, markers and playheads. Message thread. */
@@ -72,7 +78,8 @@ public:
         });
 
         const Markers m { startValue->load(), loopStartValue->load(), loopEndValue->load(),
-                          (int) loopModeValue->load(), (int) sourceValue->load() };
+                          (int) loopModeValue->load(), (int) sourceValue->load(),
+                          grainPosValue->load(), grainSprayValue->load() };
         if (! (m == markers)) { markers = m; changed = true; }
 
         std::array<float, NeonSynthProcessor::numVoices> heads {};
@@ -80,6 +87,12 @@ public:
         for (size_t i = 0; i < heads.size(); ++i)
             heads[i] = views[i].samplePosition.load (std::memory_order_relaxed);
         if (heads != playheads) { playheads = heads; changed = true; }
+
+        std::array<float, numShownGrains> grainHeads {};
+        for (size_t v = 0; v < views.size(); ++v)
+            for (size_t g = 0; g < views[v].grainPositions.size(); ++g)
+                grainHeads[v * views[v].grainPositions.size() + g] = views[v].grainPositions[g].load (std::memory_order_relaxed);
+        if (grainHeads != grains) { grains = grainHeads; changed = true; }
 
         if (changed)
             repaint();
@@ -94,8 +107,19 @@ public:
         const float alpha = active ? 1.0f : 0.35f;
         const auto inner = bounds.reduced (4.0f, 3.0f);
 
+        const bool granular = markers.source == 2;
+
+        // Granular: the band Spray can reach around Position
+        if (granular)
+        {
+            const float half = 0.5f * markers.spray;
+            const float x0 = xFor (markers.grainPos - half), x1 = xFor (markers.grainPos + half);
+            g.setColour (neon::magenta.withAlpha (0.12f));
+            g.fillRect (juce::Rectangle<float> (x0, inner.getY(), juce::jmax (1.0f, x1 - x0), inner.getHeight()));
+        }
+
         // Loop region
-        if (markers.loopMode != SampleReader::oneShot)
+        if (! granular && markers.loopMode != SampleReader::oneShot)
         {
             const float x0 = xFor (markers.loopStart), x1 = xFor (juce::jmax (markers.loopStart, markers.loopEnd));
             g.setColour (neon::amber.withAlpha (0.10f * alpha));
@@ -115,6 +139,18 @@ public:
             g.drawVerticalLine ((int) x, mid - hi * halfHeight, mid - lo * halfHeight + 1.0f);
         }
 
+        if (granular)
+        {
+            // Position, and a short tick per sounding grain
+            g.setColour (neon::magenta);
+            g.fillRect (juce::Rectangle<float> (xFor (markers.grainPos) - 1.0f, inner.getY(), 2.0f, inner.getHeight()));
+            g.setColour (juce::Colours::white.withAlpha (0.85f));
+            for (const float grain : grains)
+                if (grain >= 0.0f)
+                    g.fillRect (juce::Rectangle<float> (xFor (grain) - 0.5f, mid - halfHeight * 0.45f, 1.5f, halfHeight * 0.9f));
+            return;
+        }
+
         // Start marker
         g.setColour (neon::cyan.withAlpha (alpha));
         g.fillRect (juce::Rectangle<float> (xFor (markers.start) - 1.0f, inner.getY(), 2.0f, inner.getHeight()));
@@ -132,8 +168,8 @@ public:
         const float grab = 8.0f;
         const bool loopShown = markers.loopMode != SampleReader::oneShot;
 
-        dragging = "smpStart";
-        if (loopShown && std::abs (x - xFor (markers.loopStart)) < grab)
+        dragging = markers.source == 2 ? "grPos" : "smpStart";   // Granular: anywhere moves the cloud
+        if (markers.source != 2 && loopShown && std::abs (x - xFor (markers.loopStart)) < grab)
             dragging = "smpLoopStart";
         else if (loopShown && std::abs (x - xFor (markers.loopEnd)) < grab)
             dragging = "smpLoopEnd";
@@ -165,10 +201,11 @@ private:
     {
         float start = 0.0f, loopStart = 0.0f, loopEnd = 1.0f;
         int loopMode = 1, source = 0;
+        float grainPos = 0.5f, spray = 0.1f;
         bool operator== (const Markers& o) const noexcept
         {
             return start == o.start && loopStart == o.loopStart && loopEnd == o.loopEnd
-                && loopMode == o.loopMode && source == o.source;
+                && loopMode == o.loopMode && source == o.source && grainPos == o.grainPos && spray == o.spray;
         }
     };
 
@@ -199,12 +236,16 @@ private:
     std::atomic<float>* loopEndValue = nullptr;
     std::atomic<float>* loopModeValue = nullptr;
     std::atomic<float>* sourceValue = nullptr;
+    std::atomic<float>* grainPosValue = nullptr;
+    std::atomic<float>* grainSprayValue = nullptr;
 
     juce::String shownHash;
     bool shownDefault = false;
     std::vector<std::pair<float, float>> peaks = std::vector<std::pair<float, float>> ((size_t) numBuckets);
     Markers markers;
     std::array<float, NeonSynthProcessor::numVoices> playheads {};
+    static constexpr size_t numShownGrains = (size_t) NeonSynthProcessor::numVoices * NeonSynthVoice::Telemetry::maxShownGrains;
+    std::array<float, numShownGrains> grains {};
     juce::String dragging;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SampleView)
