@@ -5,6 +5,9 @@
 #pragma once
 #include <JuceHeader.h>
 #include "VoiceEnvelope.h"
+#include "Oscillator.h"
+#include "SampleReader.h"
+#include "GrainCloud.h"
 
 class NeonSynthSound : public juce::SynthesiserSound
 {
@@ -14,7 +17,15 @@ public:
 };
 
 /**
-    One synth voice: band-limited oscillator -> ADSR (VoiceEnvelope) -> TPT low-pass -> pan.
+    One synth voice: sound source -> ADSR (VoiceEnvelope) -> TPT low-pass -> pan.
+
+    The source is chosen per note (see Source): the band-limited oscillator
+    or the Random step wave (Oscillator.h), the loaded sample
+    (SampleReader.h) or grains of it (GrainCloud.h). Sources plug in at nextSourceSample(), so nothing after
+    it changes. A voice retriggered or stolen while playing the sample
+    crossfades from its old read position to the new one over 2 ms; grains
+    already sounding always play out, so a granular voice never clicks
+    either.
 
     Stereo: each voice is panned by its pitch (C4 in the centre, two octaves
     either side reaching the edges), scaled by the Width parameter. The pan law
@@ -28,14 +39,22 @@ public:
 class NeonSynthVoice : public juce::SynthesiserVoice
 {
 public:
+    /** Where a note's sound comes from (the Source parameter's order). */
+    enum class Source { oscillator = 0, sample = 1, granular = 2, random = 3 };
+
     /** Parameter snapshot, read once per block on the audio thread. */
     struct Params
     {
-        int   waveform = 0;            // 0 Sine, 1 Square, 2 Triangle, 3 Sawtooth
+        int   waveform = 0;            // PolyBlepOscillator::Waveform: 0 Sine, 1 Square, 2 Triangle, 3 Sawtooth
         float cutoffHz = 2000.0f;
         bool  filterOn = true;
         float width = 0.0f;            // stereo width, 0 = mono .. 1 = full spread
         juce::ADSR::Parameters adsr;
+
+        Source source = Source::oscillator;       // latched at each note-on
+        const SampleData* sample = nullptr;       // this block's sample (SampleSlot::beginBlock)
+        SampleReader::Settings sampleSettings;    // latched at each note-on
+        GrainCloud::Settings grainSettings;       // live: applies to the next grains
     };
 
     /** What the editor's visualisers need to know about this voice. */
@@ -46,6 +65,10 @@ public:
         float frequencyHz = 0.0f;
         float secondsSinceOn = 0.0f;
         float secondsSinceOff = -1.0f;   // -1 while the key is held
+        float samplePosition = -1.0f;    // read position 0..1 while playing the sample, else -1
+        static constexpr int maxShownGrains = 8;
+        std::array<float, maxShownGrains> grainPositions {};   // read positions 0..1 of up to 8 sounding grains
+        int numGrains = 0;
     };
 
     Telemetry getTelemetry() const noexcept
@@ -56,6 +79,9 @@ public:
         t.frequencyHz     = frequencyHz;
         t.secondsSinceOn  = (float) ((double) samplesSinceOn / sampleRate);
         t.secondsSinceOff = samplesSinceOff < 0 ? -1.0f : (float) ((double) samplesSinceOff / sampleRate);
+        t.samplePosition  = t.active && source == Source::sample && reader.isActive() && ! reader.hasFinished()
+                              ? reader.getPosition() : -1.0f;
+        t.numGrains       = t.active && cloud.isActive() ? cloud.getGrainPositions (t.grainPositions.data(), Telemetry::maxShownGrains) : 0;
         return t;
     }
 
@@ -70,11 +96,19 @@ public:
 
     void prepare (double newSampleRate, int maxBlockSize)
     {
+        // Audio is stopped while preparing: let go of any sample still held.
+        reader.end();
+        fadingReader.end();
+        fadingSamplesLeft = 0;
+        cloud.end();
+        resetSeeds();
+
         sampleRate = newSampleRate;
         adsr.setSampleRate (newSampleRate);
         adsr.reset();
 
         filter.prepare ({ newSampleRate, (juce::uint32) maxBlockSize, 1 });
+        cloudBuffer.assign ((size_t) juce::jmax (1, maxBlockSize), 0.0f);   // the granular source renders a block at a time
         filter.setType (juce::dsp::StateVariableTPTFilterType::lowpass);
         filter.setResonance (1.0f / juce::MathConstants<float>::sqrt2);   // Butterworth Q
 
@@ -99,19 +133,27 @@ public:
         if (! hardStopping)
             adsr.setParameters (adsrParams);
 
-        pendingWaveform = p.waveform;                     // applied at the next phase wrap
+        oscillator.setWaveform (p.waveform);              // applied at the next cycle boundary
         cutoff.setTargetValue (clampCutoff (p.cutoffHz));
         filterMix.setTargetValue (p.filterOn ? 1.0f : 0.0f);
 
         width = p.width;
         pan.setTargetValue (notePan * width);
+
+        pendingSource  = p.source;
+        blockSample    = p.sample;
+        sampleSettings = p.sampleSettings;
+        cloud.setSettings (p.grainSettings);
+        pendingGrainSettings = p.grainSettings;
     }
 
     void startNote (int midiNote, float velocity, juce::SynthesiserSound*, int) override
     {
         // Set the pitch directly: no glide from the previous note.
         frequencyHz     = (float) juce::MidiMessage::getMidiNoteInHertz (midiNote);
-        phaseInc        = (float) (frequencyHz / sampleRate);
+        oscillator.setFrequency (frequencyHz, sampleRate);
+        randomOscillator.setFrequency (frequencyHz, sampleRate);
+        startSource (midiNote);
         samplesSinceOn  = 0;
         samplesSinceOff = -1;
 
@@ -155,6 +197,7 @@ public:
 
         if (allowTailOff)
         {
+            reader.keyReleased();   // Loop until release: play on to the end
             adsr.noteOff();
             return;
         }
@@ -171,6 +214,33 @@ public:
     void controllerMoved (int, int) override {}
 
     using SynthesiserVoice::renderNextBlock;   // keep the double-precision overload visible
+
+    /**
+        Renders the voice one sample at a time, in one fused loop, in one of
+        two versions:
+
+          steady   nothing is gliding (velocity level, cutoff, filter on/off
+                   mix and pan all at rest - almost always the case): their
+                   values are read once and every "is it smoothing?" branch
+                   is out of the loop;
+          gliding  any of them is moving: each is advanced per sample.
+
+        A smoother at rest stays at rest for the whole call (targets only
+        change between calls), so the choice holds for the block. Both versions
+        do the same operations in the same order, so the output is
+        bit-identical to the single loop this replaced, and whichever runs.
+
+        Why not render stage by stage (whole buffers through the oscillator,
+        then the envelope, then the filter...) so the compiler can vectorise
+        the simple stages? That was tried, and measured 37% slower: the
+        oscillator phase, the envelope and the filter state are three
+        independent chains where each sample depends on the one before, and
+        in one fused loop the CPU overlaps the three chains' latencies. Split
+        into separate passes, each chain's latency is exposed in turn, which
+        costs far more than vectorising the cheap multiplies saves. Making a
+        synth voice faster in earnest means vectorising across voices (several
+        voices' chains side by side in SIMD lanes), not within one.
+    */
     void renderNextBlock (juce::AudioBuffer<float>& output, int startSample, int numSamples) override
     {
         if (! adsr.isActive())
@@ -179,25 +249,51 @@ public:
         auto* left  = output.getWritePointer (0);
         auto* right = output.getNumChannels() > 1 ? output.getWritePointer (1) : nullptr;
 
-        int rendered = 0;
+        // The grain cloud renders the whole stretch up front (block-wise is several times
+        // cheaper than per sample); the loop below reads it like any other source.
+        const bool cloudSounds = cloud.isActive();
+        if (cloudSounds)
+            renderCloud (numSamples);
 
+        const bool steady = ! level.isSmoothing() && ! cutoff.isSmoothing() && ! filterMix.isSmoothing() && ! pan.isSmoothing();
+        const int rendered = steady ? renderSamples<true>  (left, right, startSample, numSamples, cloudSounds)
+                                    : renderSamples<false> (left, right, startSample, numSamples, cloudSounds);
+
+        samplesSinceOn += rendered;
+        if (samplesSinceOff >= 0)
+            samplesSinceOff += rendered;
+    }
+
+private:
+    /** The render loop (see renderNextBlock()); returns how many samples it rendered. */
+    template <bool steady>
+    int renderSamples (float* left, float* right, int startSample, int numSamples, bool cloudSounds) noexcept
+    {
+        // Steady: the values that would otherwise be advanced every sample, read once.
+        // (getNextValue() of a smoother at rest just returns its value.)
+        const float steadyLevel = level.getNextValue(), steadyMix = filterMix.getNextValue();
+        const float steadyLeft = gainLeft, steadyRight = gainRight;
+
+        int rendered = 0;
         for (int i = startSample; i < startSample + numSamples; ++i, ++rendered)
         {
-            if (cutoff.isSmoothing())
-                filter.setCutoffFrequency (cutoff.getNextValue());
+            if constexpr (! steady)
+                if (cutoff.isSmoothing())
+                    filter.setCutoffFrequency (cutoff.getNextValue());
 
             lastEnvelope    = adsr.getNextSample();
-            const float dry = nextOscillatorSample() * level.getNextValue() * lastEnvelope;
+            const float dry = nextSourceSample (cloudSounds) * (steady ? steadyLevel : level.getNextValue()) * lastEnvelope;
             const float wet = filter.processSample (0, dry);   // always run: state stays warm
-            const float out = dry + filterMix.getNextValue() * (wet - dry);
+            const float out = dry + (steady ? steadyMix : filterMix.getNextValue()) * (wet - dry);
 
-            if (pan.isSmoothing())
-                updatePanGains (pan.getNextValue());
+            if constexpr (! steady)
+                if (pan.isSmoothing())
+                    updatePanGains (pan.getNextValue());
 
             if (right != nullptr)
             {
-                left[i]  += out * gainLeft;
-                right[i] += out * gainRight;
+                left[i]  += out * (steady ? steadyLeft  : gainLeft);
+                right[i] += out * (steady ? steadyRight : gainRight);
             }
             else
             {
@@ -210,16 +306,20 @@ public:
                     clearCurrentNote();
                 filter.reset();
                 lastEnvelope = 0.0f;
+                reader.end();          // silent now: let go of the sample
+                fadingReader.end();
+                fadingSamplesLeft = 0;
+                cloud.end();
                 break;
             }
-        }
 
-        samplesSinceOn += rendered;
-        if (samplesSinceOff >= 0)
-            samplesSinceOff += rendered;
+            // A one-shot sample that has played to its end: fade the voice out as for a steal.
+            if (source == Source::sample && reader.hasFinished() && ! hardStopping)
+                stopNote (0.0f, false);
+        }
+        return rendered;
     }
 
-private:
     /** Constant-power pan law, scaled so the centre is unity gain on both sides. */
     void updatePanGains (float p) noexcept
     {
@@ -233,58 +333,107 @@ private:
         return juce::jlimit (20.0f, 0.45f * (float) sampleRate, hz);   // stay well below Nyquist
     }
 
-    /** PolyBLEP residual: removes most aliasing from a step discontinuity. */
-    static float polyBlep (float t, float dt) noexcept
+    /** Picks the note's source and starts it. */
+    void startSource (int midiNote) noexcept
     {
-        if (t < dt)
+        auto newSource = pendingSource;
+        if (blockSample == nullptr && (newSource == Source::sample || newSource == Source::granular))
+            newSource = Source::oscillator;
+
+        // Retrigger or steal while the sample sounds: fade the old read position out over
+        // 2 ms instead of jumping (whatever the new note plays).
+        if (source == Source::sample && reader.isActive() && ! reader.hasFinished() && adsr.isActive())
         {
-            t /= dt;
-            return t + t - t * t - 1.0f;
+            reader.swapWith (fadingReader);   // fadingReader now holds the old note and its sample reference
+            fadingSamplesLeft = fadingSamplesTotal = juce::jmax (1, (int) (0.002 * sampleRate));
         }
-        if (t > 1.0f - dt)
+
+        source = newSource;
+        ++noteCounter;
+
+        if (source == Source::sample)
+            reader.begin (blockSample, midiNote, sampleRate, sampleSettings);
+        else
+            reader.end();
+
+        if (source == Source::granular)
         {
-            t = (t - 1.0f) / dt;
-            return t * t + t + t + 1.0f;
+            const auto seed = (juce::uint32) midiNote * 2654435761u ^ (juce::uint32) (voiceIndex + 1) * 40503u
+                            ^ (juce::uint32) noteCounter * 2246822519u;
+            cloud.begin (blockSample, midiNote, sampleSettings.rootNote, sampleRate, cloudSettings(), seed);
         }
-        return 0.0f;
+        else
+        {
+            cloud.stopSpawning();   // grains still sounding play out
+        }
     }
 
-    float nextOscillatorSample() noexcept
+    GrainCloud::Settings cloudSettings() const noexcept   { return pendingGrainSettings; }
+
+    /** Renders the cloud into cloudBuffer, in chunks if the host's block is larger than prepared. */
+    void renderCloud (int numSamples) noexcept
     {
-        const float t  = phase;
-        const float dt = phaseInc;
-        float value;
+        cloudSamples = juce::jmin (numSamples, (int) cloudBuffer.size());
+        cloud.render (cloudBuffer.data(), cloudSamples);
+        cloudRead = 0;
+        if (! cloud.isSounding())
+            cloud.end();
+    }
 
-        switch (waveform)
+    /** The current note's sound source, one sample. */
+    float nextSourceSample (bool cloudSounds) noexcept
+    {
+        float out = source == Source::oscillator ? oscillator.nextSample()
+                  : source == Source::sample     ? reader.nextSample()
+                  : source == Source::random     ? randomOscillator.nextSample()
+                                                 : 0.0f;
+
+        if (cloudSounds)
         {
-            case 1:  // Square
-                value = (t < 0.5f ? 1.0f : -1.0f)
-                      + polyBlep (t, dt)
-                      - polyBlep (std::fmod (t + 0.5f, 1.0f), dt);
-                break;
-            case 2:  // Triangle (continuous, so naive is fine)
-                value = t < 0.5f ? 4.0f * t - 1.0f : 3.0f - 4.0f * t;
-                break;
-            case 3:  // Sawtooth
-                value = 2.0f * t - 1.0f - polyBlep (t, dt);
-                break;
-            default: // Sine
-                value = std::sin (juce::MathConstants<float>::twoPi * t);
-                break;
+            if (cloudRead >= cloudSamples && cloud.isActive())   // a block larger than prepareToPlay said
+                renderCloud (cloudSamples);
+            out += cloudRead < cloudSamples ? cloudBuffer[(size_t) cloudRead++] : 0.0f;
         }
 
-        phase += dt;
-        if (phase >= 1.0f)
+        if (fadingSamplesLeft > 0)
         {
-            phase -= 1.0f;
-            waveform = pendingWaveform;   // switch shapes only at the cycle boundary
+            out += fadingReader.nextSample() * ((float) fadingSamplesLeft / (float) fadingSamplesTotal);
+            if (--fadingSamplesLeft == 0)
+                fadingReader.end();
         }
-        return value;
+        return out;
     }
 
     double sampleRate = 44100.0;
-    float  phase = 0.0f, phaseInc = 0.0f;
-    int    waveform = 0, pendingWaveform = 0;
+    Source source = Source::oscillator, pendingSource = Source::oscillator;
+    PolyBlepOscillator oscillator;
+    RandomStepOscillator randomOscillator;   // the Random source
+
+    // Sample source
+    const SampleData* blockSample = nullptr;   // this block's sample, from setParameters()
+    SampleReader::Settings sampleSettings;
+    SampleReader reader, fadingReader;         // fadingReader: the previous note, fading out after a retrigger
+    int fadingSamplesLeft = 0, fadingSamplesTotal = 1;
+
+    // Granular source
+    GrainCloud cloud;
+    GrainCloud::Settings pendingGrainSettings;
+    std::vector<float> cloudBuffer = std::vector<float> (512, 0.0f);   // sized in prepare()
+    int cloudSamples = 0, cloudRead = 0;
+    int voiceIndex = 0, noteCounter = 0;   // seed the grains, so the same MIDI renders the same audio
+
+public:
+    /** Which voice this is (0..15), for seeding the grains and the Random source. Set once by the processor. */
+    void setVoiceIndex (int index) noexcept   { voiceIndex = index; resetSeeds(); }
+
+    /** Restarts the grain seeds and the Random source (the processor's reset()), so a render can be repeated exactly. */
+    void resetSeeds() noexcept
+    {
+        noteCounter = 0;
+        randomOscillator.reseed ((juce::uint32) (voiceIndex + 1) * 2654435761u);
+    }
+
+private:
     bool   hardStopping = false;
 
     // Telemetry for the GUI (written here on the audio thread, copied out by the processor).

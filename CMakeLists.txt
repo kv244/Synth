@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(NeonSynth VERSION 1.4.0 LANGUAGES C CXX)
+project(NeonSynth VERSION 1.5.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -10,8 +10,16 @@ if(NOT DEFINED JUCE_DIR)
 endif()
 add_subdirectory("${JUCE_DIR}" "${CMAKE_BINARY_DIR}/JUCE")
 
+# No fused multiply-add contraction. The grain loop (GrainCloud.h) has scalar, SSE2 and
+# AVX2 versions that must render bit-identical audio, so a session sounds the same on
+# every machine. A compiler allowed to fuse a*b+c into one FMA (one rounding instead of
+# two) does it differently in each version: GCC and Clang do so by default whenever the
+# target has FMA (GCC 15 on Ubuntu 26.04 does, out of the box). MSVC doesn't contract
+# unless asked (/fp:contract), so it needs no flag.
+add_compile_options($<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>>:-ffp-contract=off>)
+
 juce_add_plugin(NeonSynth
-    VERSION                     1.4.0
+    VERSION                     1.5.0
     COMPANY_NAME                "AudioDSP"
     COMPANY_WEBSITE             "https://audiodsp.com"
     BUNDLE_ID                   "com.audiodsp.neonsynth"
@@ -48,6 +56,13 @@ target_sources(NeonSynth
         SequencerView.h
         HelpOverlay.h
         VoiceEnvelope.h
+        Oscillator.h
+        SampleData.h
+        SampleSlot.h
+        SampleLoader.h
+        SampleReader.h
+        GrainCloud.h
+        SampleView.h
 )
 
 target_compile_definitions(NeonSynth
@@ -81,17 +96,24 @@ target_include_directories(NeonSynth
 )
 
 # ---------------------------------------------------------------------------
-# Optional unit tests for the step sequencer engine (StepSequencer.h) and the
-# voice envelope (VoiceEnvelope.h). They only need juce_audio_basics, so they
-# build in a few seconds once JUCE is compiled:
+# Optional unit tests: the step sequencer engine (StepSequencer.h), the voice
+# envelope (VoiceEnvelope.h), the oscillator (Oscillator.h) and the sample
+# (SampleData.h, SampleSlot.h, SampleLoader.h). They only need JUCE's audio
+# modules, so they build in a few seconds once JUCE is compiled:
 #   cmake -B build -DJUCE_DIR=... -DNEONSYNTH_BUILD_TESTS=ON
-#   cmake --build build --config Release --target StepSequencerTests VoiceEnvelopeTests
-# Each executable exits non-zero if any test fails.
+#   cmake --build build --config Release --target unit_tests
+#   ctest --test-dir build -C Release --output-on-failure
+# Each executable exits non-zero if any test fails. A new test only needs its
+# name added to NEONSYNTH_UNIT_TESTS; CI runs everything ctest knows about.
 # ---------------------------------------------------------------------------
-option(NEONSYNTH_BUILD_TESTS "Build the StepSequencer and VoiceEnvelope unit tests" OFF)
+option(NEONSYNTH_BUILD_TESTS "Build the unit tests and the render benchmark" OFF)
 
 if(NEONSYNTH_BUILD_TESTS)
-    foreach(test StepSequencerTests VoiceEnvelopeTests)
+    enable_testing()
+    set(NEONSYNTH_UNIT_TESTS StepSequencerTests VoiceEnvelopeTests OscillatorTests SampleDataTests SampleReaderTests GranularTests)
+    add_custom_target(unit_tests)
+
+    foreach(test ${NEONSYNTH_UNIT_TESTS})
         juce_add_console_app(${test} PRODUCT_NAME "${test}")
         target_sources(${test} PRIVATE tests/${test}.cpp)
         target_compile_definitions(${test} PRIVATE
@@ -99,24 +121,34 @@ if(NEONSYNTH_BUILD_TESTS)
             JUCE_USE_CURL=0)
         target_link_libraries(${test} PRIVATE
             juce::juce_audio_basics
+            juce::juce_audio_formats
             juce::juce_recommended_config_flags
+            juce::juce_recommended_warning_flags)
+        add_dependencies(unit_tests ${test})
+        add_test(NAME ${test} COMMAND ${test})
+    endforeach()
+
+    # Programs that drive the whole processor directly (no host, no Python):
+    #   RenderBenchmark      times processBlock for a few load scenarios
+    #   RealtimeSafetyTests  fails if processBlock allocates (also run by ctest)
+    foreach(program RenderBenchmark RealtimeSafetyTests)
+        juce_add_console_app(${program} PRODUCT_NAME "${program}")
+        juce_generate_juce_header(${program})
+        target_sources(${program} PRIVATE tests/${program}.cpp NeonSynthProcessor.cpp)
+        target_include_directories(${program} PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+        target_compile_definitions(${program} PRIVATE
+            JUCE_WEB_BROWSER=0
+            JUCE_USE_CURL=0)
+        target_link_libraries(${program} PRIVATE
+            NeonSynthResources
+            juce::juce_audio_utils
+            juce::juce_audio_processors
+            juce::juce_dsp
+            juce::juce_recommended_config_flags
+            juce::juce_recommended_lto_flags
             juce::juce_recommended_warning_flags)
     endforeach()
 
-    # Times processBlock directly (no host, no Python) for a few load scenarios.
-    juce_add_console_app(RenderBenchmark PRODUCT_NAME "RenderBenchmark")
-    juce_generate_juce_header(RenderBenchmark)
-    target_sources(RenderBenchmark PRIVATE tests/RenderBenchmark.cpp NeonSynthProcessor.cpp)
-    target_include_directories(RenderBenchmark PRIVATE ${CMAKE_CURRENT_LIST_DIR})
-    target_compile_definitions(RenderBenchmark PRIVATE
-        JUCE_WEB_BROWSER=0
-        JUCE_USE_CURL=0)
-    target_link_libraries(RenderBenchmark PRIVATE
-        NeonSynthResources
-        juce::juce_audio_utils
-        juce::juce_audio_processors
-        juce::juce_dsp
-        juce::juce_recommended_config_flags
-        juce::juce_recommended_lto_flags
-        juce::juce_recommended_warning_flags)
+    add_dependencies(unit_tests RealtimeSafetyTests)
+    add_test(NAME RealtimeSafetyTests COMMAND RealtimeSafetyTests)
 endif()

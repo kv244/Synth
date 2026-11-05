@@ -481,7 +481,7 @@ def sequencer_onsets(plugin) -> int:
 def test_state_round_trip(plugin):
     """The pattern is saved in the state and restored; a state without one loads the default."""
     xml = state_xml(plugin)
-    assert 'stateVersion="2"' in xml, "state has no stateVersion attribute"
+    assert 'stateVersion="3"' in xml, "state has no stateVersion attribute (or not version 3)"
     assert "<Pattern>" in xml, "state has no pattern"
 
     # Only step 0 on: one note per pass through the pattern
@@ -503,6 +503,199 @@ def test_state_round_trip(plugin):
     assert default == len(DEFAULT_PATTERN_ON_STEPS), \
         f"State without a pattern kept the previous one: {default} notes, expected {len(DEFAULT_PATTERN_ON_STEPS)}"
     return f"one-step pattern: {one_step} note  no pattern: {default} notes (default)"
+
+
+SAMPLE_ELEMENT = re.compile(r"<Sample\b[^>]*/>")
+
+
+def with_sample_element(xml: str, element: str | None) -> str:
+    """The state XML with its <Sample .../> element replaced (or removed when element is None)."""
+    replacement = element or ""
+    if SAMPLE_ELEMENT.search(xml):
+        return SAMPLE_ELEMENT.sub(lambda _: replacement, xml, count=1)
+    return xml.replace("</Pattern>", "</Pattern>" + replacement, 1)
+
+
+def sample_attributes(xml: str) -> dict:
+    match = SAMPLE_ELEMENT.search(xml)
+    assert match, "state has no <Sample> element"
+    return dict(re.findall(r'(\w+)="([^"]*)"', match.group(0)))
+
+
+def write_test_wav(path: str, seconds: float = 0.5, hz: float = 330.0, rate: int = 44100):
+    import wave
+    t = np.arange(int(seconds * rate)) / rate
+    data = (0.5 * np.sin(2 * np.pi * hz * t) * 32767).astype("<i2")
+    with wave.open(path, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(data.tobytes())
+
+
+def test_sample_state(plugin):
+    """The sample is saved in the state: embedded as FLAC, by path, or as the built-in pad.
+
+    A file referenced by path loads and gets embedded; a second instance then
+    restores it from the embedded copy even after the file is gone. A sample
+    that can't be found keeps its reference (so saving doesn't lose it), and a
+    v1.4 state without a <Sample> element loads the built-in pad."""
+    import tempfile
+    from xml.sax.saxutils import quoteattr
+    original = state_xml(plugin)
+    assert sample_attributes(original), "state has no <Sample> element"
+
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as folder:
+        wav = os.path.join(folder, "neon-test.wav")
+        write_test_wav(wav)
+
+        load_state_xml(plugin, with_sample_element(original, f'<Sample name="neon-test.wav" path={quoteattr(wav)}/>'))
+        by_path = sample_attributes(state_xml(plugin))
+        assert by_path.get("name") == "neon-test.wav" and "default" not in by_path, f"file by path did not load: {by_path}"
+        assert re.fullmatch(r"[0-9a-f]{16}", by_path.get("hash", "")), f"no content hash: {by_path}"
+        assert len(by_path.get("flac", "")) > 1000, "the loaded sample was not embedded as FLAC"
+        saved = state_xml(plugin)
+
+        os.remove(wav)   # from here on only the embedded copy exists
+        other = load_plugin()
+        load_state_xml(other, saved)
+        restored = sample_attributes(state_xml(other))
+        assert restored.get("hash") == by_path["hash"], f"embedded sample restored with a different hash: {restored.get('hash')}"
+        del other
+
+        missing_path = os.path.join(folder, "gone.wav")
+        load_state_xml(plugin, with_sample_element(original,
+                       f'<Sample name="gone.wav" path={quoteattr(missing_path)} hash="0123456789abcdef"/>'))
+        kept = sample_attributes(state_xml(plugin))
+        assert kept.get("path") == missing_path and kept.get("hash") == "0123456789abcdef" and "default" not in kept, \
+            f"missing sample's reference was not kept: {kept}"
+        set_params(plugin)
+        still_plays = rms(render(plugin, [60], note_dur_s=0.3))
+        assert still_plays > 1e-3, "plugin went silent after a missing sample"
+
+    v14 = with_sample_element(original, None).replace('stateVersion="3"', 'stateVersion="2"')
+    load_state_xml(plugin, v14)
+    old = sample_attributes(state_xml(plugin))
+    load_state_xml(plugin, original)
+    assert old.get("default") == "1", f"v1.4 state did not load the built-in pad: {old}"
+    return f"embedded FLAC {len(by_path['flac']) // 1024} KB, hash {by_path['hash']}; missing file kept; v1.4 state -> default pad"
+
+
+def peak_frequency(audio: np.ndarray) -> float:
+    """Frequency of the strongest FFT bin (mono mix, Hann window), interpolated between bins."""
+    mono = (audio[0] + audio[1]) * np.hanning(audio.shape[1])
+    spectrum = np.abs(np.fft.rfft(mono))
+    k = int(np.argmax(spectrum[1:-1])) + 1
+    a, b, c = np.log(spectrum[k - 1:k + 2] + 1e-12)
+    offset = 0.5 * (a - c) / (a - 2 * b + c)
+    return (k + offset) * SAMPLE_RATE / len(mono)
+
+
+def test_sample_pitch(plugin):
+    """Source = Sample plays the loaded file pitched across the keyboard; One-shot stops at the end.
+
+    A 1 s C4 sine (261.63 Hz) is loaded through the state; with Root at C4,
+    C3, C4 and C5 must sound at 130.8, 261.6 and 523.3 Hz (within 0.5%)."""
+    import tempfile
+    from xml.sax.saxutils import quoteattr
+    original = state_xml(plugin)
+    saved = {name: p.raw_value for name, p in plugin.parameters.items()}
+    try:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as folder:
+            wav = os.path.join(folder, "c4.wav")
+            write_test_wav(wav, seconds=1.0, hz=261.6256)
+            load_state_xml(plugin, with_sample_element(original, f'<Sample name="c4.wav" path={quoteattr(wav)}/>'))
+
+        set_params(plugin, filter_on=False)
+        plugin.parameters["source"].raw_value = 1 / 3                   # Oscillator / Sample / Granular / Random
+        plugin.parameters["sample_root"].raw_value = 60 / 127
+        plugin.parameters["sample_loop"].raw_value = 0.5                # Loop
+        found = {}
+        for note, expected in ((48, 130.81), (60, 261.63), (72, 523.25)):
+            audio = plugin.process([mido.Message("note_on", note=note, velocity=100, time=0.0)], 1.5, SAMPLE_RATE, reset=True)
+            found[note] = peak_frequency(audio[:, int(0.2 * SAMPLE_RATE):])
+            assert abs(found[note] / expected - 1) < 0.005, f"note {note} played at {found[note]:.2f} Hz, expected {expected}"
+
+        # One-shot: a 1 s sample held for 2 s goes silent after it ends (plus the 2 ms fade).
+        plugin.parameters["sample_loop"].raw_value = 0.0
+        audio = plugin.process([mido.Message("note_on", note=60, velocity=100, time=0.0)], 2.0, SAMPLE_RATE, reset=True)
+        during, after = rms(audio[:, int(0.2 * SAMPLE_RATE):int(0.9 * SAMPLE_RATE)]), rms(audio[:, int(1.1 * SAMPLE_RATE):])
+        assert during > 1e-2 and after < 1e-6, f"one-shot did not stop at the end: RMS during {during:.4f}, after {after:.6f}"
+    finally:
+        for name, value in saved.items():
+            plugin.parameters[name].raw_value = value
+        load_state_xml(plugin, original)
+    return "  ".join(f"{n}: {f:.1f} Hz" for n, f in found.items()) + "  one-shot ends"
+
+
+def test_random(plugin):
+    """Source = Random plays a pitched wave of random steps that repeats exactly after a reset.
+
+    C4 on the Random source must be audible, must repeat itself one period
+    (1 / 261.63 Hz) later far more than half a step off it, which is what
+    makes it pitched rather than noise, and two renders of the same MIDI
+    (after a reset) must be identical: the steps are random but seeded."""
+    saved = {name: p.raw_value for name, p in plugin.parameters.items()}
+    try:
+        set_params(plugin, filter_on=False)
+        plugin.parameters["source"].raw_value = 1.0                     # Random
+        msgs = [mido.Message("note_on", note=60, velocity=100, time=0.0)]
+        first = plugin.process(msgs, 1.5, SAMPLE_RATE, reset=True)
+        second = plugin.process(msgs, 1.5, SAMPLE_RATE, reset=True)
+        x = first[0, int(0.3 * SAMPLE_RATE):].astype(np.float64)
+        level = rms(first[:, int(0.3 * SAMPLE_RATE):])
+
+        period = SAMPLE_RATE / 261.6256
+        def correlation(lag: int) -> float:
+            return float(np.dot(x[:-lag], x[lag:]) / np.dot(x[:-lag], x[:-lag]))
+        on_period = correlation(round(period))
+        off_period = correlation(round(period + period / 32))           # half a step later
+        assert level > 1e-2, f"Random source is silent (RMS {level:.5f})"
+        assert on_period > 0.8 and on_period > off_period + 0.25, \
+            f"Random is not pitched: correlation {on_period:.2f} one period later, {off_period:.2f} half a step off"
+        difference = float(np.max(np.abs(first - second)))
+        assert difference == 0.0, f"two renders of the same MIDI differ by up to {difference:.3g}: Random is not seeded"
+    finally:
+        for name, value in saved.items():
+            plugin.parameters[name].raw_value = value
+    return f"RMS {level:.3f}  correlation {on_period:.2f} at one period, {off_period:.2f} off it  repeat renders identical"
+
+
+def test_granular(plugin):
+    """Source = Granular plays a cloud of grains, pitched by the key, and repeats exactly.
+
+    A C4 sine is loaded through the state. C5 played on the granular source
+    must peak at 523 Hz, and two renders of the same MIDI (after a reset)
+    must be identical: the grains are random but seeded."""
+    import tempfile
+    from xml.sax.saxutils import quoteattr
+    original = state_xml(plugin)
+    saved = {name: p.raw_value for name, p in plugin.parameters.items()}
+    try:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as folder:
+            wav = os.path.join(folder, "c4.wav")
+            write_test_wav(wav, seconds=2.0, hz=261.6256)
+            load_state_xml(plugin, with_sample_element(original, f'<Sample name="c4.wav" path={quoteattr(wav)}/>'))
+
+        set_params(plugin, filter_on=False)
+        plugin.parameters["source"].raw_value = 2 / 3                   # Granular
+        plugin.parameters["sample_root"].raw_value = 60 / 127
+        plugin.parameters[find_param(plugin, "grain", "spray")].raw_value = 0.3
+        plugin.parameters[find_param(plugin, "grain", "jitter")].raw_value = 0.2   # 20 cents
+        msgs = [mido.Message("note_on", note=72, velocity=100, time=0.0)]
+        first = plugin.process(msgs, 1.5, SAMPLE_RATE, reset=True)
+        second = plugin.process(msgs, 1.5, SAMPLE_RATE, reset=True)
+        level = rms(first[:, int(0.3 * SAMPLE_RATE):])
+        pitch = peak_frequency(first[:, int(0.3 * SAMPLE_RATE):])
+        assert level > 1e-2, f"granular source is silent (RMS {level:.5f})"
+        assert abs(pitch / 523.25 - 1) < 0.01, f"C5 on the granular source peaks at {pitch:.1f} Hz, expected 523.3"
+        difference = float(np.max(np.abs(first - second)))
+        assert difference == 0.0, f"two renders of the same MIDI differ by up to {difference:.3g}: grains are not seeded"
+    finally:
+        for name, value in saved.items():
+            plugin.parameters[name].raw_value = value
+        load_state_xml(plugin, original)
+    return f"RMS {level:.3f}  peak {pitch:.1f} Hz  repeat renders identical"
 
 
 def test_keyboard_on_sequencer_channel(plugin):
@@ -624,6 +817,10 @@ TESTS = [
     ("Release mid-decay", test_release_mid_decay),
     ("Sustain change",    test_sustain_change_while_held),
     ("State round trip",  test_state_round_trip),
+    ("Sample state",      test_sample_state),
+    ("Sample pitch",      test_sample_pitch),
+    ("Granular",          test_granular),
+    ("Random",            test_random),
     ("Channel 16 key",    test_keyboard_on_sequencer_channel),
     ("Log per instance",  test_midi_log_per_instance),
 ]

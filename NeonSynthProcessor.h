@@ -7,17 +7,20 @@
 #include "NeonSynthVoice.h"
 #include "MidiLogger.h"
 #include "StepSequencer.h"
+#include "SampleSlot.h"
+#include "SampleLoader.h"
 
 class NeonSynthProcessor : public juce::AudioProcessor
 {
 public:
     NeonSynthProcessor();
-    ~NeonSynthProcessor() override = default;
+    ~NeonSynthProcessor() override;
 
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     using AudioProcessor::processBlock;   // keep the double-precision overload visible
     void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages) override;
-    void releaseResources() override {}
+    void releaseResources() override;
+    void reset() override;
 
     bool isBusesLayoutSupported (const BusesLayout& layouts) const override;
 
@@ -81,6 +84,10 @@ public:
         std::atomic<float> frequencyHz { 0.0f };
         std::atomic<float> secondsSinceOn { 0.0f };
         std::atomic<float> secondsSinceOff { -1.0f };
+        std::atomic<float> samplePosition { -1.0f };   // 0..1 while playing the sample, else -1
+        std::array<std::atomic<float>, NeonSynthVoice::Telemetry::maxShownGrains> grainPositions;   // 0..1 per sounding grain, else -1
+
+        VoiceView() { for (auto& g : grainPositions) g.store (-1.0f); }
     };
 
     const std::array<VoiceView, numVoices>& getVoiceViews() const noexcept { return voiceViews; }
@@ -114,6 +121,42 @@ public:
 
     /** True when the last block was clocked by the host transport rather than the internal tempo. */
     bool isSequencerFollowingHost() const noexcept   { return sequencerFollowsHost.load (std::memory_order_relaxed); }
+
+    //==========================================================================
+    // Sample (played by the Sample and Granular sources, v1.5.0). One sample
+    // per instance; a built-in pad until a file is loaded. See SampleData.h
+    // for how a file is prepared and SampleSlot.h for the lock-free hand-off.
+
+    /** What the editor shows about the sample. */
+    struct SampleStatus
+    {
+        juce::String name;       ///< file name, or "Default pad"
+        juce::String problem;    ///< why the last load failed, or "sample missing: <name>"; empty when fine
+        bool loading = false;    ///< a background load is in progress
+        double seconds = 0.0;
+        double sampleRate = 0.0; ///< the file's own sample rate (playback converts to the host's)
+        juce::String path;       ///< full path of the file; empty for the built-in pad
+    };
+
+    /**
+        Message thread. Starts loading a WAV, AIFF or FLAC file in the
+        background; the sample switches once it's ready. A newer request
+        supersedes an older one that hasn't finished.
+    */
+    void loadSampleFileAsync (const juce::File& file);
+
+    /** Any thread except the audio thread. Loads now; on failure the current sample stays and `error` says why. */
+    bool loadSampleFile (const juce::File& file, juce::String& error);
+
+    /** Any thread except the audio thread. Goes back to the built-in pad. */
+    void useDefaultSample();
+
+    /** Message thread (or any thread except the audio thread). */
+    SampleStatus getSampleStatus() const;
+
+    /** Calls `fn (const SampleData*)` with the current sample, safely against a concurrent load. Not for the audio thread. */
+    template <typename Fn>
+    auto withCurrentSample (Fn&& fn) const   { return sampleSlot.withCurrent (std::forward<Fn> (fn)); }
 
     //==========================================================================
     // Scope data: audio thread writes, editor timer (message thread) reads.
@@ -179,7 +222,37 @@ private:
     juce::AudioParameterFloat*  seqGateParameter       = nullptr;
     juce::AudioParameterChoice* seqModeParameter       = nullptr;
 
+    juce::AudioParameterChoice* sourceParameter        = nullptr;
+    juce::AudioParameterInt*    smpRootParameter       = nullptr;
+    juce::AudioParameterFloat*  smpStartParameter      = nullptr;
+    juce::AudioParameterChoice* smpLoopParameter       = nullptr;
+    juce::AudioParameterFloat*  smpLoopStartParameter  = nullptr;
+    juce::AudioParameterFloat*  smpLoopEndParameter    = nullptr;
+    juce::AudioParameterFloat*  smpXfadeParameter      = nullptr;
+
+    juce::AudioParameterFloat*  grPosParameter         = nullptr;
+    juce::AudioParameterFloat*  grScanParameter        = nullptr;
+    juce::AudioParameterFloat*  grSizeParameter        = nullptr;
+    juce::AudioParameterFloat*  grDensityParameter     = nullptr;
+    juce::AudioParameterFloat*  grSprayParameter       = nullptr;
+    juce::AudioParameterFloat*  grJitterParameter      = nullptr;
+
     juce::SmoothedValue<float> outputGain { 1.0f };
+
+    // Sample. sampleSlot must outlive sampleLoader (whose jobs publish into it), so it is declared first.
+    SampleSlot sampleSlot;
+    const SampleData* blockSample = nullptr;   // audio thread: the sample for the current block
+    void publishSample (std::unique_ptr<SampleData> sample, const SampleData::Origin* missing = nullptr);
+    void restoreSample (const juce::ValueTree& sampleTree);   // setStateInformation()
+
+    mutable juce::CriticalSection sampleInfoLock;   // guards the three fields below; never taken by the audio thread
+    SampleData::Origin missingSample;          // a session's sample that couldn't be found (kept so saving doesn't lose it)
+    juce::String missingSampleHash;
+    juce::String sampleProblem;
+
+    std::atomic<int>  sampleLoadGeneration { 0 };
+    std::atomic<bool> sampleLoading { false };
+    juce::ThreadPool  sampleLoader { juce::ThreadPoolOptions{}.withThreadName ("NeonSynth sample loader").withNumberOfThreads (1) };
 
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 

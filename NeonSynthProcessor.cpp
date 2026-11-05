@@ -98,6 +98,36 @@ juce::AudioProcessorValueTreeState::ParameterLayout NeonSynthProcessor::createPa
                                                          NormalisableRange<float> (0.05f, 1.0f), 0.5f));
     layout.add (std::make_unique<AudioParameterChoice> (ParameterID { "seqMode", 1 }, "Sequencer Mode",
                                                          StringArray { "Layer", "Replace", "Transpose" }, 0));        // order matches SequencerMode
+
+    // Sound source (v1.5.0). A separate parameter rather than more Waveform choices: adding
+    // items to Waveform would move its existing choices' normalised values and break
+    // automation recorded with v1.4. New parameters go at the end so old sessions map cleanly.
+    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { "source", 1 }, "Source",
+                                                         StringArray { "Oscillator", "Sample", "Granular", "Random" }, 0));   // order matches NeonSynthVoice::Source
+
+    // Sample playback; positions are fractions of the sample's length.
+    layout.add (std::make_unique<AudioParameterInt>    (ParameterID { "smpRoot", 1 }, "Sample Root", 0, 127, 60));   // MIDI note the file plays at its own pitch
+    layout.add (std::make_unique<AudioParameterFloat>  (ParameterID { "smpStart", 1 }, "Sample Start", 0.0f, 1.0f, 0.0f));
+    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { "smpLoop", 1 }, "Sample Loop",
+                                                         StringArray { "One-shot", "Loop", "Loop until release" }, 1));  // order matches SampleReader::LoopMode
+    layout.add (std::make_unique<AudioParameterFloat>  (ParameterID { "smpLoopStart", 1 }, "Sample Loop Start", 0.0f, 1.0f, 0.0f));
+    layout.add (std::make_unique<AudioParameterFloat>  (ParameterID { "smpLoopEnd", 1 }, "Sample Loop End", 0.0f, 1.0f, 1.0f));
+    layout.add (std::make_unique<AudioParameterFloat>  (ParameterID { "smpXfade", 1 }, "Sample Crossfade",
+                                                         NormalisableRange<float> (5.0f, 50.0f, 0.1f), 10.0f));       // milliseconds
+
+    // Granular. Position stays live; the others shape each grain as it starts.
+    NormalisableRange<float> grainSizeRange (5.0f, 500.0f, 0.1f);
+    grainSizeRange.setSkewForCentre (80.0f);
+    NormalisableRange<float> grainDensityRange (1.0f, 200.0f, 0.1f);
+    grainDensityRange.setSkewForCentre (30.0f);
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "grPos", 1 }, "Grain Position", 0.0f, 1.0f, 0.5f));
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "grScan", 1 }, "Grain Scan",
+                                                        NormalisableRange<float> (-2.0f, 2.0f, 0.01f), 0.0f));          // x the file's speed; 0 freezes
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "grSize", 1 }, "Grain Size", grainSizeRange, 80.0f));            // ms
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "grDensity", 1 }, "Grain Density", grainDensityRange, 30.0f));   // grains per second
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "grSpray", 1 }, "Grain Spray", 0.0f, 1.0f, 0.1f));
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "grJitter", 1 }, "Grain Pitch Jitter",
+                                                        NormalisableRange<float> (0.0f, 100.0f, 0.1f), 0.0f));          // cents
     return layout;
 }
 
@@ -106,7 +136,10 @@ NeonSynthProcessor::NeonSynthProcessor()
       apvts (*this, nullptr, "Parameters", createParameterLayout())
 {
     for (int i = 0; i < numVoices; ++i)
+    {
         voices.push_back (static_cast<NeonSynthVoice*> (synth.addVoice (new NeonSynthVoice())));
+        voices.back()->setVoiceIndex (i);
+    }
 
     synth.addSound (new NeonSynthSound());
 
@@ -133,11 +166,42 @@ NeonSynthProcessor::NeonSynthProcessor()
     seqSwingParameter      = getTypedParameter<juce::AudioParameterFloat>  (apvts, "seqSwing");
     seqGateParameter       = getTypedParameter<juce::AudioParameterFloat>  (apvts, "seqGate");
     seqModeParameter       = getTypedParameter<juce::AudioParameterChoice> (apvts, "seqMode");
+    sourceParameter        = getTypedParameter<juce::AudioParameterChoice> (apvts, "source");
+    smpRootParameter       = getTypedParameter<juce::AudioParameterInt>    (apvts, "smpRoot");
+    smpStartParameter      = getTypedParameter<juce::AudioParameterFloat>  (apvts, "smpStart");
+    smpLoopParameter       = getTypedParameter<juce::AudioParameterChoice> (apvts, "smpLoop");
+    smpLoopStartParameter  = getTypedParameter<juce::AudioParameterFloat>  (apvts, "smpLoopStart");
+    smpLoopEndParameter    = getTypedParameter<juce::AudioParameterFloat>  (apvts, "smpLoopEnd");
+    smpXfadeParameter      = getTypedParameter<juce::AudioParameterFloat>  (apvts, "smpXfade");
+    grPosParameter         = getTypedParameter<juce::AudioParameterFloat>  (apvts, "grPos");
+    grScanParameter        = getTypedParameter<juce::AudioParameterFloat>  (apvts, "grScan");
+    grSizeParameter        = getTypedParameter<juce::AudioParameterFloat>  (apvts, "grSize");
+    grDensityParameter     = getTypedParameter<juce::AudioParameterFloat>  (apvts, "grDensity");
+    grSprayParameter       = getTypedParameter<juce::AudioParameterFloat>  (apvts, "grSpray");
+    grJitterParameter      = getTypedParameter<juce::AudioParameterFloat>  (apvts, "grJitter");
 
     loadDefaultPattern();
+    publishSample (SampleLoader::makeDefaultSample());
 
     if (const auto path = findMidiLogPath (wrapperType); path.isNotEmpty())
         midiLogger.start (midiLogFileForNewInstance (path));
+}
+
+NeonSynthProcessor::~NeonSynthProcessor()
+{
+    sampleLoader.removeAllJobs (true, 10000);   // a running load finishes before the slot it publishes into goes away
+}
+
+void NeonSynthProcessor::reset()
+{
+    // Repeating a render from here gives the same grains (hosts call this before offline renders).
+    for (auto* v : voices)
+        v->resetSeeds();
+}
+
+void NeonSynthProcessor::releaseResources()
+{
+    sampleSlot.setAudioRunning (false);   // nothing reads the sample while stopped: replaced ones can be freed now
 }
 
 void NeonSynthProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
@@ -156,6 +220,8 @@ void NeonSynthProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     playMidi.ensureSize (8192);   // bytes; far more than a block of keyboard + sequencer events needs
     internalBeat   = 0.0;
     numHeldKeys    = 0;
+
+    sampleSlot.setAudioRunning (true);
 }
 
 void NeonSynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
@@ -167,6 +233,7 @@ void NeonSynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
     // audio. Add an input bus if you want to mix or modulate external sound here.
     buffer.clear();
     midiLogger.push (midiMessages, samplesProcessed);   // lock-free; formatting/I/O happen elsewhere
+    blockSample = sampleSlot.beginBlock();   // the voices' sample for this block (used by the sample sources from P2)
 
     NeonSynthVoice::Params params;
     params.waveform = waveformParameter->getIndex();
@@ -175,6 +242,13 @@ void NeonSynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
     params.width    = widthParameter->get();
     params.adsr     = { attackParameter->get(), decayParameter->get(),
                         sustainParameter->get(), releaseParameter->get() };
+
+    params.source = (NeonSynthVoice::Source) sourceParameter->getIndex();
+    params.sample = blockSample;
+    params.sampleSettings = { smpRootParameter->get(), smpStartParameter->get(), smpLoopParameter->getIndex(),
+                              smpLoopStartParameter->get(), smpLoopEndParameter->get(), smpXfadeParameter->get() * 0.001f };
+    params.grainSettings  = { grPosParameter->get(), grScanParameter->get(), grSizeParameter->get() * 0.001f,
+                              grDensityParameter->get(), grSprayParameter->get(), grJitterParameter->get() };
 
     // Every voice shares the same settings. TODO: per-voice detune for unison, or extra harmonics.
     for (auto* v : voices)
@@ -230,6 +304,9 @@ void NeonSynthProcessor::publishVoiceViews() noexcept
         v.frequencyHz    .store (t.frequencyHz,     std::memory_order_relaxed);
         v.secondsSinceOn .store (t.secondsSinceOn,  std::memory_order_relaxed);
         v.secondsSinceOff.store (t.secondsSinceOff, std::memory_order_relaxed);
+        v.samplePosition .store (t.samplePosition,  std::memory_order_relaxed);
+        for (size_t g = 0; g < v.grainPositions.size(); ++g)
+            v.grainPositions[g].store ((int) g < t.numGrains ? t.grainPositions[g] : -1.0f, std::memory_order_relaxed);
     }
 }
 
@@ -266,11 +343,24 @@ namespace
     /**
         Saved-state format version, written as an attribute of the state tree.
           (none) v1.0 - v1.3: parameters, the editor's view and, from v1.3, the pattern
-          2      v1.4+: same content; the attribute exists so later format changes
+          2      v1.4: same content; the attribute exists so later format changes
                  can tell old sessions apart and migrate them
+          3      v1.5+: adds the Sample child (the sample, embedded or by path);
+                 older states load with the built-in pad
     */
     const juce::Identifier stateVersionId { "stateVersion" };
-    constexpr int currentStateVersion = 2;
+    constexpr int currentStateVersion = 3;
+
+    // State tree layout for the sample (v1.5.0+):
+    //   <Sample default="1"/>                                  the built-in pad
+    //   <Sample name="pad.wav" path="C:/..." hash="..." flac="<base64>"/>
+    // flac is the sample itself as 24-bit FLAC, left out above 10 MB (the path is used then).
+    const juce::Identifier sampleId        { "Sample" };
+    const juce::Identifier sampleDefaultId { "default" };
+    const juce::Identifier sampleNameId    { "name" };
+    const juce::Identifier samplePathId    { "path" };
+    const juce::Identifier sampleHashId    { "hash" };
+    const juce::Identifier sampleFlacId    { "flac" };
 
     /** Keyboard input is played on this channel; the sequencer has StepSequencer::midiChannel (16). */
     constexpr int keyboardChannel = 1;
@@ -432,6 +522,86 @@ void NeonSynthProcessor::buildPlayMidi (const juce::MidiBuffer& input, int numSa
 }
 
 //==============================================================================
+// Sample
+
+void NeonSynthProcessor::publishSample (std::unique_ptr<SampleData> sample, const SampleData::Origin* missing)
+{
+    {
+        const juce::ScopedLock sl (sampleInfoLock);
+        missingSample     = missing != nullptr ? *missing : SampleData::Origin{};
+        missingSampleHash = {};
+        sampleProblem     = missing != nullptr ? "sample missing: " + missing->name : juce::String();
+    }
+    sampleSlot.publish (std::move (sample));
+}
+
+void NeonSynthProcessor::loadSampleFileAsync (const juce::File& file)
+{
+    const int generation = ++sampleLoadGeneration;
+    sampleLoading = true;
+
+    sampleLoader.addJob ([this, file, generation]
+    {
+        auto result = SampleLoader::loadFile (file);
+
+        if (generation != sampleLoadGeneration.load())
+            return;   // a newer load was requested meanwhile
+
+        if (result.sample != nullptr)
+            publishSample (std::move (result.sample));
+        else
+        {
+            const juce::ScopedLock sl (sampleInfoLock);
+            sampleProblem = file.getFileName() + ": " + result.error;
+        }
+
+        sampleLoading = false;
+        updateHostDisplay (ChangeDetails().withNonParameterStateChanged (true));
+    });
+}
+
+bool NeonSynthProcessor::loadSampleFile (const juce::File& file, juce::String& error)
+{
+    ++sampleLoadGeneration;   // supersedes any background load still running
+    auto result = SampleLoader::loadFile (file);
+
+    if (result.sample == nullptr)
+    {
+        error = result.error;
+        return false;
+    }
+
+    publishSample (std::move (result.sample));
+    return true;
+}
+
+void NeonSynthProcessor::useDefaultSample()
+{
+    ++sampleLoadGeneration;
+    publishSample (SampleLoader::makeDefaultSample());
+}
+
+NeonSynthProcessor::SampleStatus NeonSynthProcessor::getSampleStatus() const
+{
+    SampleStatus status;
+    sampleSlot.withCurrent ([&] (const SampleData* sample)
+    {
+        if (sample != nullptr)
+        {
+            status.name    = sample->getOrigin().name;
+            status.seconds    = sample->getLengthSeconds();
+            status.sampleRate = sample->getSampleRate();
+            status.path       = sample->getOrigin().path;
+        }
+    });
+
+    const juce::ScopedLock sl (sampleInfoLock);
+    status.problem = sampleProblem;
+    status.loading = sampleLoading.load();
+    return status;
+}
+
+//==============================================================================
 // State
 
 void NeonSynthProcessor::getStateInformation (juce::MemoryBlock& destData)
@@ -455,6 +625,37 @@ void NeonSynthProcessor::getStateInformation (juce::MemoryBlock& destData)
         pattern.appendChild (step, nullptr);
     }
     state.appendChild (pattern, nullptr);
+
+    if (auto previous = state.getChildWithName (sampleId); previous.isValid())
+        state.removeChild (previous, nullptr);
+
+    juce::ValueTree sampleTree (sampleId);
+    sampleSlot.withCurrent ([&] (const SampleData* sample)
+    {
+        const juce::ScopedLock sl (sampleInfoLock);
+
+        if (missingSample.path.isNotEmpty())
+        {
+            // The session's sample couldn't be found: keep pointing at it, so saving doesn't lose it.
+            sampleTree.setProperty (sampleNameId, missingSample.name, nullptr);
+            sampleTree.setProperty (samplePathId, missingSample.path, nullptr);
+            if (missingSampleHash.isNotEmpty())
+                sampleTree.setProperty (sampleHashId, missingSampleHash, nullptr);
+        }
+        else if (sample == nullptr || sample->getOrigin().isDefault)
+        {
+            sampleTree.setProperty (sampleDefaultId, true, nullptr);
+        }
+        else
+        {
+            sampleTree.setProperty (sampleNameId, sample->getOrigin().name, nullptr);
+            sampleTree.setProperty (samplePathId, sample->getOrigin().path, nullptr);
+            sampleTree.setProperty (sampleHashId, sample->getHash(), nullptr);
+            if (sample->getEmbeddedFlac().getSize() > 0)
+                sampleTree.setProperty (sampleFlacId, sample->getEmbeddedFlac().toBase64Encoding(), nullptr);
+        }
+    });
+    state.appendChild (sampleTree, nullptr);
 
     if (auto xml = state.createXml())
         copyXmlToBinary (*xml, destData);
@@ -482,6 +683,73 @@ void NeonSynthProcessor::setStateInformation (const void* data, int sizeInBytes)
                                 (int)  step.getProperty (noteId, 60),
                                 (int)  step.getProperty (velocityId, 100) });
     }
+
+    restoreSample (tree.getChildWithName (sampleId));
+}
+
+void NeonSynthProcessor::restoreSample (const juce::ValueTree& sampleTree)
+{
+    ++sampleLoadGeneration;   // a background load started before this state arrived must not win
+
+    // No Sample child (states before v1.5.0) or the default: the built-in pad.
+    if (! sampleTree.isValid() || (bool) sampleTree.getProperty (sampleDefaultId, false))
+    {
+        if (! sampleSlot.withCurrent ([] (const SampleData* current) { return current != nullptr && current->getOrigin().isDefault; }))
+        {
+            publishSample (SampleLoader::makeDefaultSample());
+        }
+        else
+        {
+            const juce::ScopedLock sl (sampleInfoLock);   // already the pad: just forget any missing-sample note
+            missingSample = {};
+            missingSampleHash = {};
+            sampleProblem = {};
+        }
+        return;
+    }
+
+    const SampleData::Origin origin { sampleTree.getProperty (sampleNameId).toString(),
+                                      sampleTree.getProperty (samplePathId).toString(), false };
+    const auto hash = sampleTree.getProperty (sampleHashId).toString();
+
+    // Already loaded (a host re-sending the same state): nothing to do.
+    if (sampleSlot.withCurrent ([&] (const SampleData* current)
+            { return current != nullptr && hash.isNotEmpty() && current->getHash() == hash && ! current->getOrigin().isDefault; }))
+    {
+        const juce::ScopedLock sl (sampleInfoLock);
+        missingSample = {};
+        sampleProblem = {};
+        return;
+    }
+
+    // 1. The embedded copy.
+    if (const auto encoded = sampleTree.getProperty (sampleFlacId).toString(); encoded.isNotEmpty())
+    {
+        juce::MemoryBlock flac;
+        if (flac.fromBase64Encoding (encoded))
+        {
+            if (auto result = SampleLoader::loadEmbeddedFlac (flac, origin); result.sample != nullptr)
+            {
+                publishSample (std::move (result.sample));
+                return;
+            }
+        }
+    }
+
+    // 2. The file, where it was saved from.
+    if (origin.path.isNotEmpty())
+    {
+        if (auto result = SampleLoader::loadFile (juce::File (origin.path)); result.sample != nullptr)
+        {
+            publishSample (std::move (result.sample));
+            return;
+        }
+    }
+
+    // 3. Neither: play the built-in pad, but remember the sample so saving keeps the reference.
+    publishSample (SampleLoader::makeDefaultSample(), &origin);
+    const juce::ScopedLock sl (sampleInfoLock);
+    missingSampleHash = hash;
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()

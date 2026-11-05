@@ -14,6 +14,9 @@ by **Razvan Julian Petrescu** / **AudioDSP**.
 ## Features
 
 - **4 Waveforms** — Sine, Square, Triangle, Sawtooth
+- **Random** — a pitched wave of 16 random steps per cycle; one step is re-rolled about every cycle, so it keeps its pitch while its timbre drifts (the whole shape is renewed every 17 cycles). Band-limited and seeded, so the same MIDI renders the same audio
+- **Granular** — a cloud of up to 32 short grains per voice from the same sample: position, scan (moving through the file at up to ±2× its speed, or frozen), grain size, density, spray and pitch jitter; seeded, so the same MIDI renders the same audio
+- **Sample playback** — load a WAV, AIFF or FLAC file (or drop it on the window) and play it across the keyboard: root note, start point, One-shot / Loop / Loop until release with a crossfaded loop, and band-limited copies so high notes don't alias. A built-in pad plays until you load a file, and the sample is saved inside the session
 - **Low-pass Filter** — adjustable cutoff (20 Hz – 20 kHz) with on/off bypass toggle
 - **16-voice Polyphony** — up to 16 simultaneous notes, with click-free voice stealing
 - **ADSR envelope** — linear segments whose durations match the knob values; Sustain changes glide (10 ms) instead of stepping, and a release always takes the Release time, whenever the note is let go
@@ -45,7 +48,7 @@ Run `NeonSynth-x.y.z-Windows-Setup.exe`. The wizard installs the VST3 to
 Releases are published only from a version tag; merging to `master` publishes nothing.
 
 1. Set the new version in `CMakeLists.txt` (both places) and `installer.nsi`, and merge it to `master`.
-2. Tag it: `git tag v1.4.0 && git push origin v1.4.0`.
+2. Tag it: `git tag v1.5.0 && git push origin v1.5.0`.
 
 The Release workflow refuses a tag that doesn't match `CMakeLists.txt`, or one that already has a release, then runs every test and pluginval at strictness 10 before building the installer.
 
@@ -116,7 +119,13 @@ the **AudioDSP** manufacturer in your DAW's instrument browser.
 
 | Control | Colour | Description |
 |---|---|---|
-| Waveform | Cyan | Oscillator shape — Sine / Square / Triangle / Sawtooth |
+| Source | Cyan | What the voices play — Oscillator (the Waveform below), Sample, Granular (grains of the sample), or Random (a pitched, evolving wave of 16 random steps) |
+| Waveform | Cyan | Oscillator shape — Sine / Square / Triangle / Sawtooth (dimmed when Source isn't Oscillator) |
+| LOAD / PAD | Cyan | Load a WAV, AIFF or FLAC file (or drop one anywhere on the window); PAD returns to the built-in pad. The file name, its length and its sample rate (for example `pad.wav  2.5 s  44.1 kHz`) and any loading problem are shown beside them; a long name is shortened, and the tooltip shows the full path |
+| Loop mode | Cyan | One-shot plays to the end; Loop loops while the note sounds (release included); Loop until release loops while the key is held, then plays on to the end |
+| Sample view | Cyan | The waveform with the start (cyan line), the loop (amber brackets) and a white playhead per sounding voice; drag a marker to move it, click to set the start |
+| ROOT / START / L.START / L.END / XFADE | Cyan | Root key (plays the file at its own pitch), start point, loop start and end, and the loop crossfade (5–50 ms) |
+| ROOT / POS / SCAN / SIZE / DENS / SPRAY / JITTER | Magenta | With Source = Granular the knob row changes: position of the cloud (also draggable on the waveform), scan speed (−2× to +2×, 0 freezes), grain size (5–500 ms), density (1–200 grains/s), spray (how far grains scatter from the position) and pitch jitter (0–100 cents). The waveform then shows the position, the spray band and a tick per sounding grain |
 | ATK / DEC / SUS / REL | Amber | Envelope knobs, with their values shown underneath; the graph above them draws the shape and a dot for every sounding voice |
 | Filter ON | Magenta | Toggle button — enables / bypasses the filter (dims the cutoff slider when off) |
 | Cutoff | Magenta | Low-pass filter cutoff frequency (20 Hz – 20 kHz) |
@@ -163,18 +172,24 @@ Before v1.4 the plugin was called **BasicSynth**. It is now **NeonSynth** (`Neon
 
 ## Unit tests and benchmark
 
-Configure with `-DNEONSYNTH_BUILD_TESTS=ON` to add three console programs:
+Configure with `-DNEONSYNTH_BUILD_TESTS=ON` to add the unit tests and the benchmark. `ctest` runs every unit test:
 
 ```bash
 cmake -S . -B build -DJUCE_DIR="/path/to/JUCE" -DNEONSYNTH_BUILD_TESTS=ON
-cmake --build build --config Release --target StepSequencerTests VoiceEnvelopeTests RenderBenchmark
+cmake --build build --config Release --target unit_tests RenderBenchmark
+ctest --test-dir build -C Release --output-on-failure
 ```
 
 | Program | What it checks |
 |---|---|
 | `StepSequencerTests` | Sequencer timing, gate, swing, rates, block-size independence, stop and loop handling, tolerance of small transport drift, triggers disabled, retriggering, step packing (15 checks) |
 | `VoiceEnvelopeTests` | The voice envelope: identical to `juce::ADSR` with fixed settings, releases that survive parameter updates, sustain slew, retriggering, release-time changes (6 checks) |
-| `RenderBenchmark` | Times `processBlock` directly (no host) for idle, one note, 16 voices and a dense sequencer + chords load |
+| `OscillatorTests` | The oscillators: pitch and DC offset of every waveform, level at high pitch, band-limited saw step, waveform changes waiting for the cycle boundary, phase kept across pitch changes; the Random source's repeatability, range, step statistics (one level replaced per cycle), pitch, and band-limited steps (27 checks) |
+| `SampleDataTests` | The sample: mono mix, −1 dBFS normalisation, 24-bit grid, 60 s cap, decimated copies (pitch kept, aliasing removed), exact FLAC round trip, file loading, the built-in pad, and the lock-free hand-off freeing replaced samples only when safe, including 2000 swaps under load (39 checks) |
+| `SampleReaderTests` | Sample playback: pitch tracking (and across sample rates), which band-limited copy each pitch reads, no aliasing at +24 semitones, steady level through crossfaded loops, smooth off-cycle loops, One-shot ends, Loop until release, start offset, the sample reference count (23 checks) |
+| `GranularTests` | The granular source: bit-identical renders from the same seed, grain counts at 5 / 50 / 200 per second, steady level across size and density, pitch, the 32-grain cap, scan speed and freeze, retrigger without cutting grains, stopping, the sample reference |
+| `RealtimeSafetyTests` | Hooks `operator new`/`delete` and fails if `processBlock` allocates or frees while rendering chords, the sequencer, every waveform and every source as another thread keeps replacing the sample |
+| `RenderBenchmark` | Times `processBlock` directly (no host) for idle, one note, 16 voices, 16 voices on each of the Sample, Random and Granular sources, and a dense sequencer + chords load |
 
 ### Performance
 
@@ -185,7 +200,12 @@ cmake --build build --config Release --target StepSequencerTests VoiceEnvelopeTe
 | Idle | 0.01% |
 | One note | 0.10% |
 | 16 voices at full velocity | 1.3% |
+| 16 voices playing the built-in sample, looped | 1.0% |
+| 16 voices on the Random source | 1.1% |
+| 16 voices on the granular source, 32 grains each (200 grains/s of 250 ms: the worst case) | 6.2% |
 | Sequencer at 1/32, 240 BPM, plus an 8-note chord every 250 ms | 1.3% |
+
+The grain loop has three versions of the same arithmetic, picked at run time: AVX2 (8 samples per step, when the CPU has it), SSE2 (4 per step, every x86-64 CPU) and scalar. They render bit-identical audio, so a session sounds the same on every machine; `GranularTests` checks this. Per grain and output sample on the development machine (Core Ultra 9 185H): scalar 4.7 ns, SSE2 2.3 ns, AVX2 2.2 ns. The loop is bound by its four reads per sample, which is why the wider AVX2 registers gain little.
 
 Timing the plugin through pedalboard is not a reliable CPU measure: render times there varied several-fold with the output level alone.
 
@@ -314,6 +334,12 @@ a fixed 120 BPM tempo, with real time preserved via tick timing.
 | Release mid-decay | With Sustain 0, a note released during its decay fades over the Release time without a click |
 | Sustain change | Changing Sustain while a note is held ramps the level instead of clicking |
 | State round trip | The pattern is saved and restored; a state without a pattern loads the default |
+| Granular | With Source = Granular and a C4 sine loaded, C5 peaks at 523 Hz, and two renders of the same MIDI are identical |
+| Random | With Source = Random, C4 repeats itself one period later (pitched, not noise), and two renders of the same MIDI are identical |
+| Sample pitch | With Source = Sample and a C4 sine loaded, C3 / C4 / C5 sound at 130.8 / 261.6 / 523.3 Hz; One-shot goes silent when the file ends |
+| Sample state | A file named in the state loads and is embedded as FLAC; another instance restores it from the embedded copy after the file is deleted; a missing sample keeps its reference; a v1.4 state loads the built-in pad |
+| Channel 16 key | A keyboard note on channel 16 survives the sequencer playing the same pitch |
+| Log per instance | Two instances logging MIDI each write their own file |
 
 ### Using the API directly
 
@@ -377,7 +403,14 @@ audio_bright = plugin.process(msgs, 2.5, SR, reset=True)
 
 | File | Purpose |
 |---|---|
-| `NeonSynthVoice.h` | Voice and sound classes — oscillator, filter, envelope |
+| `NeonSynthVoice.h` | Voice and sound classes — sound source, filter, envelope, pan |
+| `Oscillator.h` | The band-limited oscillators: sine, square, triangle, sawtooth with PolyBLEP, and the Random source's step wave |
+| `SampleData.h` | A prepared sample: mono, normalised, 24-bit grid, with 1/2- and 1/4-rate copies |
+| `SampleSlot.h` | Lock-free hand-off of the current sample to the audio thread; frees replaced samples only when safe |
+| `SampleLoader.h` | Loads WAV, AIFF and FLAC files and embedded FLAC; renders the built-in pad |
+| `SampleReader.h` | Plays a note from the sample: pitch, cubic interpolation, band-limited copies, crossfaded loops |
+| `GrainCloud.h` | The granular source: grain scheduler, 32-grain pool, Hann window, scan, spray and jitter |
+| `SampleView.h` | The sample's waveform in the editor, with draggable markers and live playheads |
 | `NeonSynthProcessor.h/cpp` | `AudioProcessor` — parameter management, MIDI, state |
 | `NeonSynthEditor.h` | Neon UI — layout, controls, resizing, the 30 Hz timer that feeds the visualisers |
 | `MidiLogger.h` | Real-time-safe MIDI logging (lock-free FIFO + background writer thread) |
@@ -387,6 +420,11 @@ audio_bright = plugin.process(msgs, 2.5, SR, reset=True)
 | `VoiceEnvelope.h` | The voice's ADSR envelope (slewed sustain, release rate fixed at note-off) |
 | `tests/StepSequencerTests.cpp` | Unit tests for the sequencer engine (`-DNEONSYNTH_BUILD_TESTS=ON`) |
 | `tests/VoiceEnvelopeTests.cpp` | Unit tests for the voice envelope |
+| `tests/OscillatorTests.cpp` | Unit tests for the oscillators, including Random |
+| `tests/SampleDataTests.cpp` | Unit tests for the sample, its loader and the hand-off |
+| `tests/SampleReaderTests.cpp` | Unit tests for sample playback |
+| `tests/GranularTests.cpp` | Unit tests for the granular source |
+| `tests/RealtimeSafetyTests.cpp` | Fails if `processBlock` allocates |
 | `tests/RenderBenchmark.cpp` | CPU benchmark of `processBlock` |
 | `Visualisers.h` | Oscilloscope, spectrum analyser, ADSR graph, voice lights and L/R meter (message thread only) |
 | `CMakeLists.txt` | Build config — Standalone + VST3, JUCE path, binary resources |

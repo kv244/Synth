@@ -8,6 +8,7 @@
 #include "Visualisers.h"
 #include "SequencerView.h"
 #include "HelpOverlay.h"
+#include "SampleView.h"
 
 /**
     Neon Synth editor.
@@ -16,8 +17,12 @@
     window can be resized (fixed aspect ratio) without any layout logic beyond
     one scale factor.
 
-    Left column: oscillator, envelope (shape + knobs), filter, voice lights.
+    Left column: source and waveform, envelope (shape + knobs), filter, voice lights.
     Right column: scope / spectrum, stereo meter, output gain and stereo width.
+    Sample strip: the loaded sample (load, built-in pad, loop mode), its
+    waveform with draggable start and loop markers and live playheads, and
+    the root / start / loop / crossfade knobs. A file can also be dropped
+    anywhere on the editor.
     Bottom strip: the step sequencer - run / sync / tempo / rate / mode on the
     first row, the 16-step grid, then swing and gate.
 
@@ -29,11 +34,12 @@
     only when what it shows has changed, so an idle editor costs almost nothing.
 */
 class NeonSynthEditor : public juce::AudioProcessorEditor,
+                         public juce::FileDragAndDropTarget,
                          private juce::Timer
 {
 public:
     explicit NeonSynthEditor (NeonSynthProcessor& p)
-        : AudioProcessorEditor (&p), processor (p), apvts (p.getAPVTS()), stepGrid (p)
+        : AudioProcessorEditor (&p), processor (p), apvts (p.getAPVTS()), sampleView (p, p.getAPVTS()), stepGrid (p)
     {
         backgroundImage = juce::ImageCache::getFromMemory (BinaryData::gui_background_png,
                                                            BinaryData::gui_background_pngSize);
@@ -49,6 +55,17 @@ public:
         seqTempoValue = apvts.getRawParameterValue ("seqTempo");
         seqSwingValue = apvts.getRawParameterValue ("seqSwing");
         seqGateValue  = apvts.getRawParameterValue ("seqGate");
+        smpRootValue     = apvts.getRawParameterValue ("smpRoot");
+        smpStartValue    = apvts.getRawParameterValue ("smpStart");
+        smpLoopStartValue = apvts.getRawParameterValue ("smpLoopStart");
+        smpLoopEndValue  = apvts.getRawParameterValue ("smpLoopEnd");
+        smpXfadeValue    = apvts.getRawParameterValue ("smpXfade");
+        grPosValue       = apvts.getRawParameterValue ("grPos");
+        grScanValue      = apvts.getRawParameterValue ("grScan");
+        grSizeValue      = apvts.getRawParameterValue ("grSize");
+        grDensityValue   = apvts.getRawParameterValue ("grDensity");
+        grSprayValue     = apvts.getRawParameterValue ("grSpray");
+        grJitterValue    = apvts.getRawParameterValue ("grJitter");
 
         // ── Oscillator ───────────────────────────────────────────────────────
         addAndMakeVisible (waveformCombo);
@@ -61,6 +78,100 @@ public:
         waveformCombo.setColour (juce::ComboBox::arrowColourId,   neon::cyan);
         waveformAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>
             (apvts, "waveform", waveformCombo);
+
+        addAndMakeVisible (sourceCombo);
+        sourceCombo.addItemList ({ "Oscillator", "Sample", "Granular", "Random" }, 1);   // same order as the parameter
+        sourceCombo.setTooltip ("What the voices play: the oscillator (Waveform), the loaded sample, grains of it, or Random: a pitched wave of 16 random steps that keeps evolving");
+        for (auto id : { juce::ComboBox::outlineColourId, juce::ComboBox::textColourId, juce::ComboBox::arrowColourId })
+            sourceCombo.setColour (id, neon::cyan);
+        sourceAttachment = std::make_unique<ComboBoxAttachment> (apvts, "source", sourceCombo);
+
+        // ── Sample ───────────────────────────────────────────────────────────
+        addAndMakeVisible (sampleView);
+        setUpReadout (sampleNameLabel, neon::cyan, juce::Justification::centredLeft);
+        sampleNameLabel.setInterceptsMouseClicks (true, false);   // so its tooltip (the full path) shows
+        setUpReadout (sampleStatusLabel, neon::red, juce::Justification::centredRight);
+
+        for (auto* button : { &loadButton, &padButton })
+        {
+            button->setColour (juce::TextButton::buttonColourId,  juce::Colours::transparentBlack);
+            button->setColour (juce::TextButton::textColourOffId, neon::cyan);
+            button->setColour (juce::ComboBox::outlineColourId,   neon::cyan.withAlpha (0.6f));
+            addAndMakeVisible (button);
+        }
+        loadButton.setTooltip ("Load a WAV, AIFF or FLAC file (or drop one on the synth)");
+        padButton.setTooltip ("Go back to the built-in pad");
+        loadButton.onClick = [this] { chooseSampleFile(); };
+        padButton.onClick  = [this] { processor.useDefaultSample(); };
+
+        addAndMakeVisible (smpLoopCombo);
+        smpLoopCombo.addItemList ({ "One-shot", "Loop", "Loop until release" }, 1);   // same order as the parameter
+        smpLoopCombo.setTooltip ("One-shot: play to the end.  Loop: loop while the note sounds.  "
+                                 "Loop until release: loop while the key is held, then play on to the end.");
+        for (auto id : { juce::ComboBox::outlineColourId, juce::ComboBox::textColourId, juce::ComboBox::arrowColourId })
+            smpLoopCombo.setColour (id, neon::cyan);
+        smpLoopAttachment = std::make_unique<ComboBoxAttachment> (apvts, "smpLoop", smpLoopCombo);
+
+        const std::pair<juce::Slider*, const char*> sampleKnobs[] = {
+            { &smpRootKnob, "smpRoot" }, { &smpStartKnob, "smpStart" }, { &smpLoopStartKnob, "smpLoopStart" },
+            { &smpLoopEndKnob, "smpLoopEnd" }, { &smpXfadeKnob, "smpXfade" } };
+        for (size_t i = 0; i < std::size (sampleKnobs); ++i)
+        {
+            auto* knob = sampleKnobs[i].first;
+            knob->setSliderStyle (juce::Slider::Rotary);
+            knob->setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
+            knob->setColour (juce::Slider::rotarySliderFillColourId,    neon::cyan);
+            knob->setColour (juce::Slider::rotarySliderOutlineColourId, neon::cyan.withAlpha (0.3f));
+            knob->setColour (juce::Slider::thumbColourId,               neon::cyan);
+            addAndMakeVisible (knob);
+            sampleKnobAttachments[i] = std::make_unique<SliderAttachment> (apvts, sampleKnobs[i].second, *knob);
+        }
+        smpRootKnob.setTooltip ("Root: the key at which the sample plays at its own pitch");
+        smpXfadeKnob.setTooltip ("Loop crossfade length");
+
+        const std::pair<juce::Slider*, const char*> grainKnobs[] = {
+            { &grPosKnob, "grPos" }, { &grScanKnob, "grScan" }, { &grSizeKnob, "grSize" },
+            { &grDensityKnob, "grDensity" }, { &grSprayKnob, "grSpray" }, { &grJitterKnob, "grJitter" } };
+        for (size_t i = 0; i < std::size (grainKnobs); ++i)
+        {
+            auto* knob = grainKnobs[i].first;
+            knob->setSliderStyle (juce::Slider::Rotary);
+            knob->setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
+            knob->setColour (juce::Slider::rotarySliderFillColourId,    neon::magenta);
+            knob->setColour (juce::Slider::rotarySliderOutlineColourId, neon::magenta.withAlpha (0.3f));
+            knob->setColour (juce::Slider::thumbColourId,               neon::magenta);
+            addChildComponent (knob);
+            grainKnobAttachments[i] = std::make_unique<SliderAttachment> (apvts, grainKnobs[i].second, *knob);
+        }
+        grPosKnob.setTooltip ("Position: where in the sample the cloud sits (or drag the magenta line on the waveform)");
+        grScanKnob.setTooltip ("Scan: how fast the cloud moves through the sample, in either direction; 0 freezes it");
+        grSizeKnob.setTooltip ("Size: length of each grain");
+        grDensityKnob.setTooltip ("Density: grains started per second");
+        grSprayKnob.setTooltip ("Spray: how far each grain may start from the cloud's position");
+        grJitterKnob.setTooltip ("Pitch jitter: random detune of each grain, in cents");
+
+        for (auto* label : { &smpRootReadout, &smpStartReadout, &smpLoopStartReadout, &smpLoopEndReadout, &smpXfadeReadout,
+                             &grPosReadout, &grScanReadout, &grSizeReadout, &grDensityReadout, &grSprayReadout, &grJitterReadout })
+            setUpReadout (*label, neon::cyan, juce::Justification::centred);
+        for (auto* label : { &grPosReadout, &grScanReadout, &grSizeReadout, &grDensityReadout, &grSprayReadout, &grJitterReadout })
+            label->setColour (juce::Label::textColourId, neon::magenta);
+
+        // Waveform only applies to the oscillator, the loop mode only to Sample, and the
+        // knob row follows the source: Sample's knobs, or Granular's.
+        sourceListener = std::make_unique<juce::ParameterAttachment> (
+            *apvts.getParameter ("source"),
+            [this] (float value)
+            {
+                const int source = juce::roundToInt (value);
+                waveformCombo.setAlpha (source == 0 ? 1.0f : 0.45f);
+                smpLoopCombo.setAlpha (source == 2 ? 0.45f : 1.0f);
+                if (std::exchange (granularShown, source == 2) != granularShown && getWidth() > 0)
+                {
+                    resized();
+                    repaint();
+                }
+            });
+        sourceListener->sendInitialUpdate();
 
         // ── Envelope ─────────────────────────────────────────────────────────
         addAndMakeVisible (adsrView);
@@ -240,7 +351,8 @@ public:
         };
 
         // Left column
-        place (waveformCombo, 30, 72, 340, 28);
+        place (sourceCombo,   30, 72, 140, 28);
+        place (waveformCombo, 178, 72, 192, 28);
         place (adsrView,      30, 130, 340, 64);
 
         const float knobX[] = { 30, 120, 210, 300 };
@@ -268,25 +380,51 @@ public:
         place (widthSlider,    452, 362, 228, 24);
         place (widthReadout,   680, 366, 60, 16);
 
+        // Sample strip
+        place (sampleNameLabel,   100, 403, 196, 16);
+        place (loadButton,        300, 400, 58, 22);
+        place (padButton,         362, 400, 58, 22);
+        place (smpLoopCombo,      430, 400, 150, 22);
+        place (sampleStatusLabel, 586, 403, 154, 16);
+        place (sampleView,        30, 428, 390, 62);
+
+        for (const auto& slot : allKnobSlots())
+        {
+            slot.knob->setVisible (false);
+            slot.readout->setVisible (false);
+        }
+        const auto row = knobRow();
+        for (size_t i = 0; i < row.size(); ++i)
+        {
+            const auto x = (float) rowKnobX ((int) i, (int) row.size());
+            const auto w = (float) knobWidth ((int) row.size());
+            place (*row[i].knob,    x, 426, w, 38);
+            place (*row[i].readout, x, 478, w, 12);
+            row[i].knob->setVisible (true);
+            row[i].readout->setVisible (true);
+        }
+
         // Sequencer strip
-        place (seqOnButton,     135, 400, 62, 22);
-        place (seqSyncButton,   200, 400, 66, 22);
-        place (seqTempoSlider,  316, 400, 150, 22);
-        place (seqTempoReadout, 466, 403, 84, 16);
-        place (seqRateCombo,    560, 400, 70, 22);
-        place (seqModeCombo,    636, 400, 104, 22);
-        place (stepGrid,        30, 430, 710, 50);
-        place (seqSwingSlider,  80, 486, 230, 22);
-        place (seqSwingReadout, 310, 489, 60, 16);
-        place (seqGateSlider,   446, 486, 234, 22);
-        place (seqGateReadout,  680, 489, 60, 16);
+        place (seqOnButton,     135, 506, 62, 22);
+        place (seqSyncButton,   200, 506, 66, 22);
+        place (seqTempoSlider,  316, 506, 150, 22);
+        place (seqTempoReadout, 466, 509, 84, 16);
+        place (seqRateCombo,    560, 506, 70, 22);
+        place (seqModeCombo,    636, 506, 104, 22);
+        place (stepGrid,        30, 536, 710, 50);
+        place (seqSwingSlider,  80, 592, 230, 22);
+        place (seqSwingReadout, 310, 595, 60, 16);
+        place (seqGateSlider,   446, 592, 234, 22);
+        place (seqGateReadout,  680, 595, 60, 16);
 
         place (helpButton, 712, 12, 28, 24);
         helpOverlay.setBounds (getLocalBounds());
 
         for (auto* label : { &attackReadout, &decayReadout, &sustainReadout, &releaseReadout,
                              &cutoffReadout, &gainReadout, &widthReadout,
-                             &seqTempoReadout, &seqSwingReadout, &seqGateReadout })
+                             &seqTempoReadout, &seqSwingReadout, &seqGateReadout, &sampleNameLabel, &sampleStatusLabel,
+                             &smpRootReadout, &smpStartReadout, &smpLoopStartReadout, &smpLoopEndReadout, &smpXfadeReadout,
+                             &grPosReadout, &grScanReadout, &grSizeReadout, &grDensityReadout, &grSprayReadout, &grJitterReadout })
             label->setFont (neon::font (11.0f * s));
     }
 
@@ -318,16 +456,30 @@ public:
         g.drawText ("GAIN",  400, 338, 50, 20, juce::Justification::left);
         g.drawText ("WIDTH", 400, 364, 50, 20, juce::Justification::left);
 
+        // Sample strip
+        g.setColour (neon::cyan.withAlpha (0.25f));
+        g.drawHorizontalLine (394, 30.0f, 740.0f);
+        g.setColour (neon::cyan);
+        g.setFont (neon::font (13.0f));
+        g.drawText ("SAMPLE", 30, 401, 70, 20, juce::Justification::left);
+        g.setFont (neon::font (11.0f));
+        const auto row = knobRow();
+        for (size_t i = 0; i < row.size(); ++i)
+        {
+            g.setColour (row[i].knob == &smpRootKnob || ! granularShown ? neon::cyan : neon::magenta);
+            g.drawText (row[i].name, rowKnobX ((int) i, (int) row.size()), 465, knobWidth ((int) row.size()), 13, juce::Justification::centred);
+        }
+
         // Sequencer strip
         g.setColour (neon::amber.withAlpha (0.25f));
-        g.drawHorizontalLine (394, 30.0f, 740.0f);
+        g.drawHorizontalLine (500, 30.0f, 740.0f);
         g.setColour (neon::amber);
         g.setFont (neon::font (13.0f));
-        g.drawText ("SEQUENCER", 30, 401, 100, 20, juce::Justification::left);
+        g.drawText ("SEQUENCER", 30, 507, 100, 20, juce::Justification::left);
         g.setFont (neon::font (11.0f));
-        g.drawText ("TEMPO", 272, 401, 44, 20, juce::Justification::left);
-        g.drawText ("SWING", 30,  487, 50, 20, juce::Justification::left);
-        g.drawText ("GATE",  400, 487, 46, 20, juce::Justification::left);
+        g.drawText ("TEMPO", 272, 507, 44, 20, juce::Justification::left);
+        g.drawText ("SWING", 30,  593, 50, 20, juce::Justification::left);
+        g.drawText ("GATE",  400, 593, 46, 20, juce::Justification::left);
 
         g.setColour (neon::amber);
         const char* names[] = { "ATK", "DEC", "SUS", "REL" };
@@ -342,11 +494,106 @@ private:
     using ComboBoxAttachment = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
 
     static constexpr int baseWidth  = 760;
-    static constexpr int baseHeight = 520;
+    static constexpr int baseHeight = 626;
     static constexpr int timerHz    = 30;
     static inline const juce::Identifier viewPropertyId { "view" };
 
     float scale() const noexcept { return (float) getWidth() / (float) baseWidth; }
+
+    // The knob row of the sample strip: Sample's five knobs, or Granular's seven (sharing ROOT).
+    struct KnobSlot { juce::Slider* knob; juce::Label* readout; const char* name; };
+
+    std::vector<KnobSlot> knobRow()
+    {
+        if (granularShown)
+            return { { &smpRootKnob, &smpRootReadout, "ROOT" }, { &grPosKnob, &grPosReadout, "POS" },
+                     { &grScanKnob, &grScanReadout, "SCAN" }, { &grSizeKnob, &grSizeReadout, "SIZE" },
+                     { &grDensityKnob, &grDensityReadout, "DENS" }, { &grSprayKnob, &grSprayReadout, "SPRAY" },
+                     { &grJitterKnob, &grJitterReadout, "JITTER" } };
+
+        return { { &smpRootKnob, &smpRootReadout, "ROOT" }, { &smpStartKnob, &smpStartReadout, "START" },
+                 { &smpLoopStartKnob, &smpLoopStartReadout, "L.START" }, { &smpLoopEndKnob, &smpLoopEndReadout, "L.END" },
+                 { &smpXfadeKnob, &smpXfadeReadout, "XFADE" } };
+    }
+
+    std::vector<KnobSlot> allKnobSlots()
+    {
+        auto all = knobRow();
+        granularShown = ! granularShown;
+        const auto other = knobRow();
+        granularShown = ! granularShown;
+        all.insert (all.end(), other.begin(), other.end());
+        return all;
+    }
+
+    /** 5 knobs at 62 apart, or 7 at 44 apart, from x = 430 to 740. */
+    static int knobSpacing (int count) noexcept   { return count > 5 ? 44 : 62; }
+    static int knobWidth (int count) noexcept     { return knobSpacing (count) - 4; }
+    static int rowKnobX (int i, int count) noexcept { return 430 + knobSpacing (count) * i; }
+
+    /** name + details, with the name shortened ("...") so the details always fit the label. */
+    juce::String fitSampleName (const juce::String& name, const juce::String& details) const
+    {
+        const auto font = sampleNameLabel.getFont();
+        const auto width = [&font] (const juce::String& text)
+        {
+            juce::GlyphArrangement glyphs;
+            glyphs.addLineOfText (font, text, 0.0f, 0.0f);
+            return glyphs.getBoundingBox (0, -1, true).getWidth();
+        };
+
+        const float available = (float) sampleNameLabel.getWidth() - 4.0f;
+        if (width (name + details) <= available)
+            return name + details;
+
+        auto shortened = name;
+        while (shortened.length() > 1 && width (shortened + "..." + details) > available)
+            shortened = shortened.dropLastCharacters (1);
+        return shortened.trimEnd() + "..." + details;
+    }
+
+    /** 48000 -> "48 kHz", 44100 -> "44.1 kHz", 22050 -> "22.05 kHz". */
+    static juce::String formatSampleRate (double rate)
+    {
+        if (rate <= 0.0)
+            return {};
+        const auto hz = juce::roundToInt (rate);
+        const int decimals = hz % 1000 == 0 ? 0 : (hz % 100 == 0 ? 1 : 2);
+        return juce::String (hz / 1000.0, decimals) + " kHz";
+    }
+
+    //==========================================================================
+    // Sample files
+
+    static bool isSampleFile (const juce::String& path)
+    {
+        return juce::File (path).hasFileExtension ("wav;aif;aiff;flac");
+    }
+
+    void chooseSampleFile()
+    {
+        chooser = std::make_unique<juce::FileChooser> ("Load a sample", juce::File(), "*.wav;*.aif;*.aiff;*.flac");
+        chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                              [this] (const juce::FileChooser& fc)
+                              {
+                                  if (const auto file = fc.getResult(); file.existsAsFile())
+                                      processor.loadSampleFileAsync (file);
+                              });
+    }
+
+public:
+    bool isInterestedInFileDrag (const juce::StringArray& files) override
+    {
+        return files.size() == 1 && isSampleFile (files[0]);
+    }
+
+    void filesDropped (const juce::StringArray& files, int, int) override
+    {
+        if (files.size() == 1 && isSampleFile (files[0]))
+            processor.loadSampleFileAsync (juce::File (files[0]));
+    }
+
+private:
 
     void setUpLinearSlider (juce::Slider& slider, juce::Colour colour)
     {
@@ -407,6 +654,33 @@ private:
                                   : juce::String (seqTempoValue->load(), 1) + " BPM");
         set (seqSwingReadout, juce::String (juce::roundToInt (seqSwingValue->load() * 100.0f)) + "%");
         set (seqGateReadout,  juce::String (juce::roundToInt (seqGateValue->load() * 100.0f)) + "%");
+
+        const auto percent = [] (float v) { return juce::String (juce::roundToInt (v * 100.0f)) + "%"; };
+        set (smpRootReadout,      juce::MidiMessage::getMidiNoteName (juce::roundToInt (smpRootValue->load()), true, true, 4));
+        set (smpStartReadout,     percent (smpStartValue->load()));
+        set (smpLoopStartReadout, percent (smpLoopStartValue->load()));
+        set (smpLoopEndReadout,   percent (smpLoopEndValue->load()));
+        set (smpXfadeReadout,     juce::String (juce::roundToInt (smpXfadeValue->load())) + " ms");
+
+        const float scan = grScanValue->load();
+        set (grPosReadout,     percent (grPosValue->load()));
+        set (grScanReadout,    scan == 0.0f ? juce::String ("frozen") : (scan > 0.0f ? "+" : "") + juce::String (scan, 2) + "x");
+        set (grSizeReadout,    juce::String (juce::roundToInt (grSizeValue->load())) + " ms");
+        set (grDensityReadout, juce::String (juce::roundToInt (grDensityValue->load())) + "/s");
+        set (grSprayReadout,   percent (grSprayValue->load()));
+        set (grJitterReadout,  juce::String (juce::roundToInt (grJitterValue->load())) + " ct");
+
+        const auto status = processor.getSampleStatus();
+        // Re-fitted only when the text or the label's size changes (it measures glyphs).
+        const auto details = "  " + juce::String (status.seconds, 1) + " s  " + formatSampleRate (status.sampleRate);
+        if (status.name + details != fittedFor || sampleNameLabel.getWidth() != fittedWidth)
+        {
+            fittedFor   = status.name + details;
+            fittedWidth = sampleNameLabel.getWidth();
+            set (sampleNameLabel, fitSampleName (status.name, details));
+        }
+        sampleNameLabel.setTooltip (status.path.isNotEmpty() ? status.path : status.name);
+        set (sampleStatusLabel, status.loading ? juce::String ("loading...") : status.problem);
     }
 
     void timerCallback() override
@@ -438,6 +712,7 @@ private:
         adsrView.update (attackValue->load(), decayValue->load(), sustainValue->load(), releaseValue->load(), voices);
         voiceLeds.update (voices);
         stepGrid.refresh();   // pattern + playhead
+        sampleView.refresh(); // sample, markers, playheads
         updateReadouts();
     }
 
@@ -456,6 +731,17 @@ private:
     std::atomic<float>* seqTempoValue = nullptr;
     std::atomic<float>* seqSwingValue = nullptr;
     std::atomic<float>* seqGateValue = nullptr;
+    std::atomic<float>* smpRootValue = nullptr;
+    std::atomic<float>* smpStartValue = nullptr;
+    std::atomic<float>* smpLoopStartValue = nullptr;
+    std::atomic<float>* smpLoopEndValue = nullptr;
+    std::atomic<float>* smpXfadeValue = nullptr;
+    std::atomic<float>* grPosValue = nullptr;
+    std::atomic<float>* grScanValue = nullptr;
+    std::atomic<float>* grSizeValue = nullptr;
+    std::atomic<float>* grDensityValue = nullptr;
+    std::atomic<float>* grSprayValue = nullptr;
+    std::atomic<float>* grJitterValue = nullptr;
 
     // Visualisers and their data
     SignalHistory    history;
@@ -482,6 +768,23 @@ private:
                                       cutoffAttachment, gainAttachment, widthAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> filterToggleAttachment;
 
+    // Source and sample
+    juce::ComboBox sourceCombo, smpLoopCombo;
+    std::unique_ptr<ComboBoxAttachment> sourceAttachment, smpLoopAttachment;
+    SampleView       sampleView;
+    juce::Label      sampleNameLabel, sampleStatusLabel;
+    juce::TextButton loadButton { "LOAD" }, padButton { "PAD" };
+    juce::Slider     smpRootKnob, smpStartKnob, smpLoopStartKnob, smpLoopEndKnob, smpXfadeKnob;
+    juce::Label      smpRootReadout, smpStartReadout, smpLoopStartReadout, smpLoopEndReadout, smpXfadeReadout;
+    std::array<std::unique_ptr<SliderAttachment>, 5> sampleKnobAttachments;
+    juce::Slider     grPosKnob, grScanKnob, grSizeKnob, grDensityKnob, grSprayKnob, grJitterKnob;
+    juce::Label      grPosReadout, grScanReadout, grSizeReadout, grDensityReadout, grSprayReadout, grJitterReadout;
+    std::array<std::unique_ptr<SliderAttachment>, 6> grainKnobAttachments;
+    bool granularShown = false;   // the knob row shows Granular's knobs
+    std::unique_ptr<juce::FileChooser> chooser;
+    juce::String fittedFor;      // the sample label's last unshortened text, and the width it was fitted to
+    int fittedWidth = -1;
+
     // Step sequencer
     StepGrid           stepGrid;
     juce::TextButton seqOnButton { "RUN" }, seqSyncButton { "SYNC" };
@@ -496,6 +799,7 @@ private:
     juce::TextButton helpButton { "?" };
     HelpOverlay      helpOverlay { baseWidth };
 
+    std::unique_ptr<juce::ParameterAttachment> sourceListener;
     std::unique_ptr<juce::ParameterAttachment> filterEnabledListener;   // last: destroyed first
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (NeonSynthEditor)
