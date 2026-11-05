@@ -110,6 +110,32 @@ int main()
         a.end(); b.end(); c.end();
     }
 
+    std::printf ("SIMD paths\n");
+    {
+        // The AVX2, SSE2 and scalar grain loops must render the same audio, bit for bit:
+        // they do the same operations in the same order, only on more samples at once.
+        const auto renderWith = [&] (GrainCloud::SimdPath path)
+        {
+            GrainCloud::forceSimdPath (path);
+            GrainCloud c;
+            c.begin (noise.get(), 64, 60, rate, cloud (73, 80, 0.7f, 40.0f, -0.6f), 2024);
+            std::vector<float> out (96000);
+            for (size_t i = 0; i < out.size(); i += 333)   // odd block sizes, so every loop's tail is exercised
+                c.render (out.data() + i, (int) std::min<size_t> (333, out.size() - i));
+            c.end();
+            return out;
+        };
+        const auto scalar = renderWith (GrainCloud::SimdPath::scalar);
+        const auto sse2   = renderWith (GrainCloud::SimdPath::sse2);
+        const auto avx2   = renderWith (GrainCloud::SimdPath::avx2);
+        GrainCloud::forceSimdPath (GrainCloud::SimdPath::automatic);
+
+        check (scalar == sse2, "the SSE2 grain loop renders bit-identical audio to the scalar loop");
+        std::snprintf (what, sizeof (what), "the AVX2 grain loop renders bit-identical audio to the scalar loop%s",
+                       GrainCloud::cpuHasAVX2() ? "" : " (no AVX2 on this CPU: SSE2 was used)");
+        check (scalar == avx2, what);
+    }
+
     std::printf ("Density\n");
     for (const float density : { 5.0f, 50.0f, 200.0f })
     {

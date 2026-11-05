@@ -68,18 +68,17 @@ public:
         const int length = (int) juce::jmin ((juce::int64) source.getNumSamples(),
                                              (juce::int64) (maxSeconds * sourceSampleRate));
 
+        // The whole-array steps (mono mix, peak, normalise) use JUCE's FloatVectorOperations,
+        // which run them with SSE / NEON. Same arithmetic per element as the loops they
+        // replace, so the prepared sample (and its hash) is unchanged.
         std::vector<float> mono ((size_t) (length + 2 * padding), 0.0f);
+        float* const samples = mono.data() + padding;
         const float channelScale = 1.0f / (float) source.getNumChannels();
         for (int ch = 0; ch < source.getNumChannels(); ++ch)
-        {
-            const float* in = source.getReadPointer (ch);
-            for (int i = 0; i < length; ++i)
-                mono[(size_t) (padding + i)] += in[i] * channelScale;
-        }
+            juce::FloatVectorOperations::addWithMultiply (samples, source.getReadPointer (ch), channelScale, length);
 
-        float peak = 0.0f;
-        for (int i = 0; i < length; ++i)
-            peak = juce::jmax (peak, std::abs (mono[(size_t) (padding + i)]));
+        const auto extremes = juce::FloatVectorOperations::findMinAndMax (samples, length);
+        const float peak = juce::jmax (-extremes.getStart(), extremes.getEnd(), 0.0f);
 
         if (peak < 1.0e-6f)
         {
@@ -87,13 +86,12 @@ public:
             return nullptr;
         }
 
-        // Normalise to -1 dBFS and round to the 24-bit grid.
-        const float gain = normalise ? peakGain / peak : 1.0f;
+        // Normalise to -1 dBFS, then round to the 24-bit grid (a scalar loop: rounding to
+        // the grid has no FloatVectorOperations equivalent, and this runs once per load).
+        if (normalise)
+            juce::FloatVectorOperations::multiply (samples, peakGain / peak, length);
         for (int i = 0; i < length; ++i)
-        {
-            auto& s = mono[(size_t) (padding + i)];
-            s = quantise24 (s * gain);
-        }
+            samples[i] = quantise24 (samples[i]);
 
         std::unique_ptr<SampleData> data (new SampleData());
         data->origin     = std::move (origin);

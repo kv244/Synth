@@ -128,12 +128,12 @@ public:
             }
         }
 
-        float peak = 0.0f;
-        for (int i = 0; i < displayLength; ++i)
-        {
-            display[(size_t) i] = recent[(size_t) (start + i)];
-            peak = juce::jmax (peak, std::abs (display[(size_t) i]));
-        }
+        // JUCE's FloatVectorOperations use SSE / NEON for these whole-array jobs: a few
+        // times faster than the element loops they replace, for one line each. (GUI
+        // thread, so this is tidiness more than a needed speed-up.)
+        juce::FloatVectorOperations::copy (display.data(), recent.data() + start, displayLength);
+        const auto extremes = juce::FloatVectorOperations::findMinAndMax (display.data(), displayLength);
+        const float peak = juce::jmax (-extremes.getStart(), extremes.getEnd(), 0.0f);
 
         // Auto-range with a slow release so the trace keeps a steady size.
         const float newRange = juce::jmax (peak, range * 0.92f, 0.02f);
@@ -195,12 +195,8 @@ public:
             {
                 const int first = c * displayLength / columns;
                 const int last  = juce::jmax (first + 1, (c + 1) * displayLength / columns);
-                float lo = display[(size_t) first], hi = lo;
-                for (int i = first + 1; i < last; ++i)
-                {
-                    lo = juce::jmin (lo, display[(size_t) i]);
-                    hi = juce::jmax (hi, display[(size_t) i]);
-                }
+                const auto column = juce::FloatVectorOperations::findMinAndMax (display.data() + first, last - first);   // SIMD min/max
+                const float lo = column.getStart(), hi = column.getEnd();
                 const float x = area.getX() + area.getWidth() * (float) c / (float) (columns - 1);
                 if (c == 0) trace.startNewSubPath (x, midY - hi * yScale);
                 else        trace.lineTo (x, midY - hi * yScale);
@@ -260,8 +256,7 @@ public:
         filterOn   = newFilterOn;
 
         history.copyLatest (fftData.data(), fftSize);
-        for (size_t n = 0; n < (size_t) fftSize; ++n)
-            fftData[n] *= window[n];
+        juce::FloatVectorOperations::multiply (fftData.data(), window.data(), fftSize);   // Hann window, SIMD
         std::fill (fftData.begin() + fftSize, fftData.end(), 0.0f);
 
         fft.performFrequencyOnlyForwardTransform (fftData.data());
@@ -288,8 +283,8 @@ public:
             {
                 const int first = juce::jlimit (0, fftSize / 2 - 1, (int) std::ceil (lo));
                 const int last  = juce::jlimit (0, fftSize / 2 - 1, (int) std::floor (hi));
-                for (int k = first; k <= last; ++k)
-                    magnitude = juce::jmax (magnitude, fftData[(size_t) k]);
+                if (last >= first)
+                    magnitude = juce::jmax (magnitude, juce::FloatVectorOperations::findMaximum (fftData.data() + first, last - first + 1));
             }
 
             const float db   = juce::Decibels::gainToDecibels (magnitude * norm, minDb);
@@ -538,12 +533,18 @@ private:
 
         void update (const float* samples, int numSamples, float fall, int holdLength, bool& clipped)
         {
+            // Peak with SIMD; the sum of squares stays a plain loop: without fast-math the
+            // compiler may not reorder a running sum into vector lanes (that would change
+            // its rounding), and JUCE has no vector sum. A few hundred samples a frame is
+            // nothing either way.
             float peak = 0.0f, sumSquares = 0.0f;
-            for (int i = 0; i < numSamples; ++i)
+            if (numSamples > 0)
             {
-                peak = juce::jmax (peak, std::abs (samples[i]));
-                sumSquares += samples[i] * samples[i];
+                const auto extremes = juce::FloatVectorOperations::findMinAndMax (samples, numSamples);
+                peak = juce::jmax (-extremes.getStart(), extremes.getEnd(), 0.0f);
             }
+            for (int i = 0; i < numSamples; ++i)
+                sumSquares += samples[i] * samples[i];
             clipped = clipped || peak >= clipLightThreshold;
 
             const float rms    = numSamples > 0 ? std::sqrt (sumSquares / (float) numSamples) : 0.0f;
