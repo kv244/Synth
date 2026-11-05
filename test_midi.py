@@ -505,6 +505,63 @@ def test_state_round_trip(plugin):
     return f"one-step pattern: {one_step} note  no pattern: {default} notes (default)"
 
 
+def test_keyboard_on_sequencer_channel(plugin):
+    """A keyboard note on MIDI channel 16 survives the sequencer playing the same pitch.
+
+    The sequencer plays on channel 16. Before v1.4.0 a keyboard sending on
+    channel 16 shared it, so the sequencer's C3 note-off also stopped a held
+    keyboard C3.
+
+    The keyboard note starts 10 ms after the step. Through pedalboard's VST3
+    host, a host note-on landing on the very sample of a sequencer note-on of
+    the same pitch never reaches the synth; driving processBlock directly, the
+    plugin plays both, so that case is a host artefact, not a plugin bug."""
+    original = state_xml(plugin)
+    set_params(plugin)
+    with SequencerOn(plugin):
+        xml = state_xml(plugin)
+        steps = "".join(f'<Step on="{1 if i == 0 else 0}" note="48" velocity="100"/>' for i in range(16))
+        load_state_xml(plugin, xml[:xml.index("<Pattern>")] + "<Pattern>" + steps + xml[xml.index("</Pattern>"):])
+        held = [mido.Message("note_on", channel=15, note=48, velocity=100, time=0.01)]   # mido channel 15 = MIDI 16
+        audio = plugin.process(held, 1.5, SAMPLE_RATE, reset=True)
+    load_state_xml(plugin, original)
+    # The sequencer's step-0 C3 ends after 62.5 ms plus a 300 ms release; the
+    # held keyboard C3 must still sound well after that.
+    later = rms(audio[:, int(0.6 * SAMPLE_RATE):])
+    assert later > 1e-3, f"Keyboard note on channel 16 was cut off by the sequencer — RMS {later:.6f}"
+    return f"held note RMS after the sequencer note ended={later:.4f}"
+
+
+def test_midi_log_per_instance(plugin):
+    """Two plugin instances logging MIDI write two separate files instead of fighting over one."""
+    import gc
+    import glob
+    import tempfile
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as folder:
+        base = os.path.join(folder, "midi.log")
+        previous = os.environ.get("NEONSYNTH_MIDILOG")
+        os.environ["NEONSYNTH_MIDILOG"] = base
+        try:
+            first, second = load_plugin(), load_plugin()
+        finally:
+            if previous is None:
+                del os.environ["NEONSYNTH_MIDILOG"]
+            else:
+                os.environ["NEONSYNTH_MIDILOG"] = previous
+        first.process([mido.Message("note_on", note=60, velocity=100, time=0.0)], 0.2, SAMPLE_RATE, reset=True)
+        second.process([mido.Message("note_on", note=72, velocity=100, time=0.0)], 0.2, SAMPLE_RATE, reset=True)
+        del first, second
+        gc.collect()   # the plugins' destructors flush and close their logs
+        # pedalboard creates extra probe instances while loading, which open
+        # (empty) logs of their own, so only the logs that saw a note count.
+        logs = sorted(glob.glob(os.path.join(folder, "midi*.log")))
+        played = [(os.path.basename(f), open(f).read()) for f in logs]
+        played = [(name, text) for name, text in played if "Note on" in text]
+    assert len(played) == 2, f"Expected two logs with a note, found {[name for name, _ in played]} among {len(logs)} logs"
+    assert all(text.count("Note on") == 1 for _, text in played), "Each log should hold exactly its own instance's note"
+    return "two instances wrote " + " and ".join(name for name, _ in played)
+
+
 def test_close_events_sample_accurate(plugin):
     """Two notes 20 samples apart in the same block each start on their own sample.
 
@@ -567,6 +624,8 @@ TESTS = [
     ("Release mid-decay", test_release_mid_decay),
     ("Sustain change",    test_sustain_change_while_held),
     ("State round trip",  test_state_round_trip),
+    ("Channel 16 key",    test_keyboard_on_sequencer_channel),
+    ("Log per instance",  test_midi_log_per_instance),
 ]
 
 

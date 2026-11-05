@@ -64,7 +64,8 @@
 
     Notes are sent on MIDI channel 16 so they can never cancel a note of the
     same pitch played on the keyboard (juce::Synthesiser matches note-offs by
-    channel as well as note number).
+    channel as well as note number). The processor moves all keyboard input to
+    channel 1, so this holds whatever channel the keyboard sends on.
 */
 class StepSequencer
 {

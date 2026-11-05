@@ -29,6 +29,24 @@ namespace
         return path;
     }
 
+    /**
+        Each plugin instance that logs gets its own file, so instances never
+        delete or overwrite each other's log: the first uses the path as given
+        (relative to the working directory), later ones in the same process add
+        "-2", "-3", ... before the extension (midi.log, midi-2.log, ...).
+    */
+    juce::File midiLogFileForNewInstance (const juce::String& path)
+    {
+        static std::atomic<int> loggingInstances { 0 };
+        const int instance = ++loggingInstances;
+
+        auto file = juce::File::getCurrentWorkingDirectory().getChildFile (path);
+        if (instance > 1)
+            file = file.getSiblingFile (file.getFileNameWithoutExtension() + "-" + juce::String (instance)
+                                        + file.getFileExtension());
+        return file;
+    }
+
     template <typename ParamType>
     ParamType* getTypedParameter (juce::AudioProcessorValueTreeState& state, const char* id)
     {
@@ -119,7 +137,7 @@ NeonSynthProcessor::NeonSynthProcessor()
     loadDefaultPattern();
 
     if (const auto path = findMidiLogPath (wrapperType); path.isNotEmpty())
-        midiLogger.start (juce::File::getCurrentWorkingDirectory().getChildFile (path));
+        midiLogger.start (midiLogFileForNewInstance (path));
 }
 
 void NeonSynthProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
@@ -254,6 +272,10 @@ namespace
     const juce::Identifier stateVersionId { "stateVersion" };
     constexpr int currentStateVersion = 2;
 
+    /** Keyboard input is played on this channel; the sequencer has StepSequencer::midiChannel (16). */
+    constexpr int keyboardChannel = 1;
+    static_assert (keyboardChannel != StepSequencer::midiChannel);
+
     /** Notes are transposed relative to this key in Transpose mode (C4). */
     constexpr int transposeReferenceNote = 60;
 }
@@ -318,20 +340,39 @@ void NeonSynthProcessor::buildPlayMidi (const juce::MidiBuffer& input, int numSa
     //    note-off for a note that isn't sounding, so this is harmless.
     //    SysEx is dropped: the synth ignores it, and a large dump could
     //    outgrow playMidi's preallocated capacity on the audio thread.
+    //
+    //    Keyboard messages are moved to MIDI channel 1, whatever channel they
+    //    arrived on. The sequencer owns channel 16; juce::Synthesiser matches
+    //    note-offs by channel and note, so a keyboard on channel 16 would
+    //    otherwise have its notes cut off by the sequencer playing the same
+    //    pitch. The synth has no per-channel behaviour of its own, so nothing
+    //    else changes (a sustain pedal still holds the keyboard's notes).
     for (const auto event : input)
     {
-        if (event.numBytes > 0 && event.data[0] == 0xf0)
-            continue;   // SysEx
+        if (event.numBytes <= 0 || event.data[0] == 0xf0)
+            continue;   // empty or SysEx
 
-        const int  status  = event.numBytes >= 3 ? (event.data[0] & 0xf0) : 0;
-        const bool noteOn  = status == 0x90 && event.data[2] > 0;
-        const bool noteOff = status == 0x80 || (status == 0x90 && event.data[2] == 0);
+        juce::uint8 bytes[3] = {};
+        const int numBytes = juce::jmin (event.numBytes, 3);
+        std::memcpy (bytes, event.data, (size_t) numBytes);
+
+        if (event.numBytes <= 3 && bytes[0] >= 0x80 && bytes[0] < 0xf0)
+            bytes[0] = (juce::uint8) ((bytes[0] & 0xf0) | (keyboardChannel - 1));
+
+        const int  status  = numBytes >= 3 ? (bytes[0] & 0xf0) : 0;
+        const bool noteOn  = status == 0x90 && bytes[2] > 0;
+        const bool noteOff = status == 0x80 || (status == 0x90 && bytes[2] == 0);
 
         if ((noteOn || noteOff) && mode == SequencerMode::transpose)
-            trackHeldKey (event.data[1], noteOn);
+            trackHeldKey (bytes[1], noteOn);
 
         if (! noteOn || mode == SequencerMode::layer)
-            playMidi.addEvent (event.data, event.numBytes, event.samplePosition);
+        {
+            if (event.numBytes <= 3)
+                playMidi.addEvent (bytes, numBytes, event.samplePosition);
+            else
+                playMidi.addEvent (event.data, event.numBytes, event.samplePosition);   // longer system messages, unchanged
+        }
     }
 
     // 2. Musical time: the host transport when Sync is on and the host reports
