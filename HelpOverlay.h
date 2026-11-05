@@ -40,7 +40,7 @@ public:
         const float s = (float) getWidth() / (float) baseWidth;
         g.addTransform (juce::AffineTransform::scale (s));
 
-        neon::drawPanel (g, { 20.0f, 16.0f, (float) baseWidth - 40.0f, 488.0f }, neon::cyan);
+        neon::drawPanel (g, { 20.0f, 16.0f, (float) baseWidth - 40.0f, 594.0f }, neon::cyan);
 
         g.setColour (juce::Colours::white);
         g.setFont (neon::font (18.0f));
@@ -55,7 +55,7 @@ public:
         {
             juce::TextLayout layout;
             layout.createLayout (columns[i], columnWidth);
-            layout.draw (g, { columnX[i], 62.0f, columnWidth, 436.0f });
+            layout.draw (g, { columnX[i], 62.0f, columnWidth, 542.0f });
         }
     }
 
@@ -126,11 +126,16 @@ private:
 
         // Right column: the synth and getting sound out.
         addSection (columns[1], { "SOUND", {
-            "OSCILLATOR: the waveform.",
+            "SOURCE: the oscillator (with its Waveform) or the loaded sample.",
             "ENVELOPE: attack, decay, sustain and release of every note.",
             "FILTER: low-pass cutoff; ON switches it in.",
             "GAIN: output level. WIDTH: stereo spread of the voices.",
             "VOICES lights the 16 voices in use. SCOPE / SPECTRUM switch the display." } }, neon::cyan);
+
+        addSection (columns[1], { "SAMPLE", {
+            "LOAD a WAV, AIFF or FLAC file, or drop one anywhere on the synth. PAD goes back to the built-in pad.",
+            "ROOT is the key that plays the file at its own pitch. Drag the cyan line to set the start and the amber brackets to set the loop.",
+            "One-shot plays to the end; Loop loops while the note sounds; Loop until release loops while the key is held. XFADE smooths the loop point." } }, neon::cyan);
 
         addSection (columns[1], { "PLAYING NOTES", {
             "MIDI keyboard in the Standalone: Options > Audio/MIDI Settings, then tick it under MIDI inputs.",
@@ -141,7 +146,7 @@ private:
             "Check the output device and its active channels in Options > Audio/MIDI Settings." } }, neon::cyan);
 
         addSection (columns[1], { "SAVING", {
-            "The pattern and all settings are saved with your DAW project (and by the Standalone between runs)." } }, neon::cyan);
+            "The pattern, the sample (up to 10 MB, otherwise by its path) and all settings are saved with your DAW project (and by the Standalone between runs)." } }, neon::cyan);
     }
 
     const int baseWidth;

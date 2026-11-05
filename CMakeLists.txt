@@ -52,6 +52,8 @@ target_sources(NeonSynth
         SampleData.h
         SampleSlot.h
         SampleLoader.h
+        SampleReader.h
+        SampleView.h
 )
 
 target_compile_definitions(NeonSynth
@@ -99,7 +101,7 @@ option(NEONSYNTH_BUILD_TESTS "Build the unit tests and the render benchmark" OFF
 
 if(NEONSYNTH_BUILD_TESTS)
     enable_testing()
-    set(NEONSYNTH_UNIT_TESTS StepSequencerTests VoiceEnvelopeTests OscillatorTests SampleDataTests)
+    set(NEONSYNTH_UNIT_TESTS StepSequencerTests VoiceEnvelopeTests OscillatorTests SampleDataTests SampleReaderTests)
     add_custom_target(unit_tests)
 
     foreach(test ${NEONSYNTH_UNIT_TESTS})

@@ -8,7 +8,7 @@
     Global operator new/delete are replaced with versions that count calls
     made while the calling thread is inside processBlock. The processor then
     renders a busy session - chords, the sequencer at 1/32, every waveform,
-    parameter changes - while a second thread keeps replacing the sample
+    every source and loop mode, parameter changes - while a second thread keeps replacing the sample
     (file loads, the default pad, embedded FLAC via state), as the GUI or a
     host would. Any allocation or free on the audio thread is a failure.
 
@@ -192,6 +192,10 @@ int main()
                 midi.addEvent (juce::MidiMessage::noteOff (1, 48 + 5 * n), n * 11);
         if (b % 200 == 0)
             setParameter (processor, "waveform", (float) ((b / 200) % 4));   // Sine, Square, Triangle, Sawtooth
+        if (b % 300 == 0)
+            setParameter (processor, "source", (float) ((b / 300) % 3));     // Oscillator, Sample, Granular
+        if (b % 450 == 0)
+            setParameter (processor, "smpLoop", (float) ((b / 450) % 3));    // One-shot, Loop, Loop until release
 
         inAudioCallback = true;
         processor.processBlock (buffer, midi);

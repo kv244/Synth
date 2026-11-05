@@ -581,6 +581,53 @@ def test_sample_state(plugin):
     return f"embedded FLAC {len(by_path['flac']) // 1024} KB, hash {by_path['hash']}; missing file kept; v1.4 state -> default pad"
 
 
+def peak_frequency(audio: np.ndarray) -> float:
+    """Frequency of the strongest FFT bin (mono mix, Hann window), interpolated between bins."""
+    mono = (audio[0] + audio[1]) * np.hanning(audio.shape[1])
+    spectrum = np.abs(np.fft.rfft(mono))
+    k = int(np.argmax(spectrum[1:-1])) + 1
+    a, b, c = np.log(spectrum[k - 1:k + 2] + 1e-12)
+    offset = 0.5 * (a - c) / (a - 2 * b + c)
+    return (k + offset) * SAMPLE_RATE / len(mono)
+
+
+def test_sample_pitch(plugin):
+    """Source = Sample plays the loaded file pitched across the keyboard; One-shot stops at the end.
+
+    A 1 s C4 sine (261.63 Hz) is loaded through the state; with Root at C4,
+    C3, C4 and C5 must sound at 130.8, 261.6 and 523.3 Hz (within 0.5%)."""
+    import tempfile
+    from xml.sax.saxutils import quoteattr
+    original = state_xml(plugin)
+    saved = {name: p.raw_value for name, p in plugin.parameters.items()}
+    try:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as folder:
+            wav = os.path.join(folder, "c4.wav")
+            write_test_wav(wav, seconds=1.0, hz=261.6256)
+            load_state_xml(plugin, with_sample_element(original, f'<Sample name="c4.wav" path={quoteattr(wav)}/>'))
+
+        set_params(plugin, filter_on=False)
+        plugin.parameters["source"].raw_value = 0.5                     # Oscillator / Sample / Granular
+        plugin.parameters["sample_root"].raw_value = 60 / 127
+        plugin.parameters["sample_loop"].raw_value = 0.5                # Loop
+        found = {}
+        for note, expected in ((48, 130.81), (60, 261.63), (72, 523.25)):
+            audio = plugin.process([mido.Message("note_on", note=note, velocity=100, time=0.0)], 1.5, SAMPLE_RATE, reset=True)
+            found[note] = peak_frequency(audio[:, int(0.2 * SAMPLE_RATE):])
+            assert abs(found[note] / expected - 1) < 0.005, f"note {note} played at {found[note]:.2f} Hz, expected {expected}"
+
+        # One-shot: a 1 s sample held for 2 s goes silent after it ends (plus the 2 ms fade).
+        plugin.parameters["sample_loop"].raw_value = 0.0
+        audio = plugin.process([mido.Message("note_on", note=60, velocity=100, time=0.0)], 2.0, SAMPLE_RATE, reset=True)
+        during, after = rms(audio[:, int(0.2 * SAMPLE_RATE):int(0.9 * SAMPLE_RATE)]), rms(audio[:, int(1.1 * SAMPLE_RATE):])
+        assert during > 1e-2 and after < 1e-6, f"one-shot did not stop at the end: RMS during {during:.4f}, after {after:.6f}"
+    finally:
+        for name, value in saved.items():
+            plugin.parameters[name].raw_value = value
+        load_state_xml(plugin, original)
+    return "  ".join(f"{n}: {f:.1f} Hz" for n, f in found.items()) + "  one-shot ends"
+
+
 def test_keyboard_on_sequencer_channel(plugin):
     """A keyboard note on MIDI channel 16 survives the sequencer playing the same pitch.
 
@@ -701,6 +748,7 @@ TESTS = [
     ("Sustain change",    test_sustain_change_while_held),
     ("State round trip",  test_state_round_trip),
     ("Sample state",      test_sample_state),
+    ("Sample pitch",      test_sample_pitch),
     ("Channel 16 key",    test_keyboard_on_sequencer_channel),
     ("Log per instance",  test_midi_log_per_instance),
 ]

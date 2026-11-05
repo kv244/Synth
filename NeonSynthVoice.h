@@ -6,6 +6,7 @@
 #include <JuceHeader.h>
 #include "VoiceEnvelope.h"
 #include "Oscillator.h"
+#include "SampleReader.h"
 
 class NeonSynthSound : public juce::SynthesiserSound
 {
@@ -17,9 +18,11 @@ public:
 /**
     One synth voice: sound source -> ADSR (VoiceEnvelope) -> TPT low-pass -> pan.
 
-    The source is chosen per note (see Source). Today there is one, the
-    band-limited oscillator in Oscillator.h; the sample and granular sources
-    plug in at nextSourceSample(), so nothing after it changes.
+    The source is chosen per note (see Source): the band-limited oscillator
+    (Oscillator.h) or the loaded sample (SampleReader.h). Sources plug in at
+    nextSourceSample(), so nothing after it changes. A voice retriggered or
+    stolen while playing the sample crossfades from its old read position to
+    the new one over 2 ms instead of jumping.
 
     Stereo: each voice is panned by its pitch (C4 in the centre, two octaves
     either side reaching the edges), scaled by the Width parameter. The pan law
@@ -33,8 +36,8 @@ public:
 class NeonSynthVoice : public juce::SynthesiserVoice
 {
 public:
-    /** Where a note's sound comes from. Sample and Granular follow in v1.5.0. */
-    enum class Source { oscillator };
+    /** Where a note's sound comes from (the Source parameter's order). Granular follows in P3 and plays as Sample until then. */
+    enum class Source { oscillator = 0, sample = 1, granular = 2 };
 
     /** Parameter snapshot, read once per block on the audio thread. */
     struct Params
@@ -44,6 +47,10 @@ public:
         bool  filterOn = true;
         float width = 0.0f;            // stereo width, 0 = mono .. 1 = full spread
         juce::ADSR::Parameters adsr;
+
+        Source source = Source::oscillator;       // latched at each note-on
+        const SampleData* sample = nullptr;       // this block's sample (SampleSlot::beginBlock)
+        SampleReader::Settings sampleSettings;    // latched at each note-on
     };
 
     /** What the editor's visualisers need to know about this voice. */
@@ -54,6 +61,7 @@ public:
         float frequencyHz = 0.0f;
         float secondsSinceOn = 0.0f;
         float secondsSinceOff = -1.0f;   // -1 while the key is held
+        float samplePosition = -1.0f;    // read position 0..1 while playing the sample, else -1
     };
 
     Telemetry getTelemetry() const noexcept
@@ -64,6 +72,8 @@ public:
         t.frequencyHz     = frequencyHz;
         t.secondsSinceOn  = (float) ((double) samplesSinceOn / sampleRate);
         t.secondsSinceOff = samplesSinceOff < 0 ? -1.0f : (float) ((double) samplesSinceOff / sampleRate);
+        t.samplePosition  = t.active && source != Source::oscillator && reader.isActive() && ! reader.hasFinished()
+                              ? reader.getPosition() : -1.0f;
         return t;
     }
 
@@ -78,6 +88,11 @@ public:
 
     void prepare (double newSampleRate, int maxBlockSize)
     {
+        // Audio is stopped while preparing: let go of any sample still held.
+        reader.end();
+        fadingReader.end();
+        fadingSamplesLeft = 0;
+
         sampleRate = newSampleRate;
         adsr.setSampleRate (newSampleRate);
         adsr.reset();
@@ -113,6 +128,10 @@ public:
 
         width = p.width;
         pan.setTargetValue (notePan * width);
+
+        pendingSource  = p.source;
+        blockSample    = p.sample;
+        sampleSettings = p.sampleSettings;
     }
 
     void startNote (int midiNote, float velocity, juce::SynthesiserSound*, int) override
@@ -120,6 +139,7 @@ public:
         // Set the pitch directly: no glide from the previous note.
         frequencyHz     = (float) juce::MidiMessage::getMidiNoteInHertz (midiNote);
         oscillator.setFrequency (frequencyHz, sampleRate);
+        startSource (midiNote);
         samplesSinceOn  = 0;
         samplesSinceOff = -1;
 
@@ -163,6 +183,7 @@ public:
 
         if (allowTailOff)
         {
+            reader.keyReleased();   // Loop until release: play on to the end
             adsr.noteOff();
             return;
         }
@@ -218,8 +239,15 @@ public:
                     clearCurrentNote();
                 filter.reset();
                 lastEnvelope = 0.0f;
+                reader.end();          // silent now: let go of the sample
+                fadingReader.end();
+                fadingSamplesLeft = 0;
                 break;
             }
+
+            // A one-shot sample that has played to its end: fade the voice out as for a steal.
+            if (reader.hasFinished() && source != Source::oscillator && ! hardStopping)
+                stopNote (0.0f, false);
         }
 
         samplesSinceOn += rendered;
@@ -241,20 +269,51 @@ private:
         return juce::jlimit (20.0f, 0.45f * (float) sampleRate, hz);   // stay well below Nyquist
     }
 
+    /** Picks the note's source and, for the sample, starts reading it. */
+    void startSource (int midiNote) noexcept
+    {
+        auto newSource = pendingSource == Source::granular ? Source::sample : pendingSource;   // Granular: P3
+        if (blockSample == nullptr)
+            newSource = Source::oscillator;
+
+        // Retrigger or steal while the sample sounds: fade the old read position out over
+        // 2 ms instead of jumping (whatever the new note plays).
+        if (source == Source::sample && reader.isActive() && ! reader.hasFinished() && adsr.isActive())
+        {
+            reader.swapWith (fadingReader);   // fadingReader now holds the old note and its sample reference
+            fadingSamplesLeft = fadingSamplesTotal = juce::jmax (1, (int) (0.002 * sampleRate));
+        }
+
+        source = newSource;
+        if (source == Source::sample)
+            reader.begin (blockSample, midiNote, sampleRate, sampleSettings);
+        else
+            reader.end();
+    }
+
     /** The current note's sound source, one sample. */
     float nextSourceSample() noexcept
     {
-        switch (source)
+        float out = source == Source::oscillator ? oscillator.nextSample() : reader.nextSample();
+
+        if (fadingSamplesLeft > 0)
         {
-            case Source::oscillator:
-            default:
-                return oscillator.nextSample();
+            out += fadingReader.nextSample() * ((float) fadingSamplesLeft / (float) fadingSamplesTotal);
+            if (--fadingSamplesLeft == 0)
+                fadingReader.end();
         }
+        return out;
     }
 
     double sampleRate = 44100.0;
-    Source source = Source::oscillator;
+    Source source = Source::oscillator, pendingSource = Source::oscillator;
     PolyBlepOscillator oscillator;
+
+    // Sample source
+    const SampleData* blockSample = nullptr;   // this block's sample, from setParameters()
+    SampleReader::Settings sampleSettings;
+    SampleReader reader, fadingReader;         // fadingReader: the previous note, fading out after a retrigger
+    int fadingSamplesLeft = 0, fadingSamplesTotal = 1;
     bool   hardStopping = false;
 
     // Telemetry for the GUI (written here on the audio thread, copied out by the processor).
