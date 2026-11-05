@@ -1,3 +1,7 @@
+// NeonSynth - Copyright (C) 2026 Razvan Julian Petrescu
+// SPDX-License-Identifier: AGPL-3.0-only
+// Licensed under the GNU Affero General Public License v3; see LICENSE.
+
 #pragma once
 #include <JuceHeader.h>
 #include "Visualisers.h"
@@ -146,4 +150,4 @@ private:
     std::array<juce::AttributedString, 2> columns;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (HelpOverlay)
-};
+};

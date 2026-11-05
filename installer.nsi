@@ -29,7 +29,7 @@ SetCompressor       /SOLID lzma
 !define MUI_WELCOMEPAGE_TITLE    "Welcome to ${PRODUCT_NAME} ${PRODUCT_VERSION}"
 !define MUI_WELCOMEPAGE_TEXT     "This will install ${PRODUCT_NAME} by ${PRODUCT_AUTHOR}.$\r$\n$\r$\nClick Next to continue."
 !define MUI_FINISHPAGE_TITLE     "Installation complete"
-!define MUI_FINISHPAGE_TEXT      "${PRODUCT_NAME} has been installed.$\r$\n$\r$\nVST3 plugins are scanned automatically by your DAW on next launch."
+!define MUI_FINISHPAGE_TEXT      "${PRODUCT_NAME} has been installed.$\r$\n$\r$\nVST3 plugins are scanned automatically by your DAW on next launch.$\r$\n$\r$\n${PRODUCT_NAME} is free software under the GNU AGPL v3. Source code: https://github.com/kv244/Synth"
 !define MUI_FINISHPAGE_NOAUTOCLOSE
 
 !insertmacro MUI_PAGE_WELCOME

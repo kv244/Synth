@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# NeonSynth - Copyright (C) 2026 Razvan Julian Petrescu
+# SPDX-License-Identifier: AGPL-3.0-only
+# Licensed under the GNU Affero General Public License v3; see LICENSE.
 """
 NeonSynth automated tests using pedalboard + mido.
 Loads the VST3 directly — no MIDI ports, loopMIDI, or DAW required.

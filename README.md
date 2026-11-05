@@ -400,4 +400,23 @@ audio_bright = plugin.process(msgs, 2.5, SR, reset=True)
 | `.github/workflows/release.yml` | Release on a version tag — all tests, pluginval (strictness 10), installer, GitHub Release |
 | `requirements-test.txt` | Pinned Python dependencies for `test_midi.py` |
 | `installer.nsi` | NSIS installer script (VST3 + Standalone) |
-| `LICENSE` | MIT licence |
+| `LICENSE` | GNU Affero General Public License v3 |
+
+---
+
+## License
+
+Copyright (C) 2026 Razvan Julian Petrescu. Portions assisted by Claude (Anthropic).
+
+NeonSynth is free software: you can redistribute it and/or modify it under the terms of the
+[GNU Affero General Public License version 3](LICENSE) (AGPL-3.0-only), as published by the Free
+Software Foundation. It is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+See the license for details.
+
+NeonSynth is built on [JUCE](https://juce.com), which it uses under JUCE's AGPLv3 option. If you
+distribute NeonSynth, or software built from it, you must make the complete corresponding source
+available under the same license; this repository is that source for the official releases.
+
+Releases up to and including v1.3.0 were published under the MIT license; from v1.4.0 the project
+is licensed under the AGPLv3.

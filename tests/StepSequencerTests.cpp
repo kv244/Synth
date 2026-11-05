@@ -1,3 +1,7 @@
+// NeonSynth - Copyright (C) 2026 Razvan Julian Petrescu
+// SPDX-License-Identifier: AGPL-3.0-only
+// Licensed under the GNU Affero General Public License v3; see LICENSE.
+
 /*
     Unit tests for StepSequencer (sample-accurate timing, gate, swing,
     transport stop / jump, tolerance of small transport drift, block-size

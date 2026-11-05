@@ -1,3 +1,7 @@
+// NeonSynth - Copyright (C) 2026 Razvan Julian Petrescu
+// SPDX-License-Identifier: AGPL-3.0-only
+// Licensed under the GNU Affero General Public License v3; see LICENSE.
+
 /*
     Render benchmark: times NeonSynthProcessor::processBlock directly,
     with no host or Python in the way, so the numbers are the plugin's own cost.

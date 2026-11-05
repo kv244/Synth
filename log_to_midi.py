@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# NeonSynth - Copyright (C) 2026 Razvan Julian Petrescu
+# SPDX-License-Identifier: AGPL-3.0-only
+# Licensed under the GNU Affero General Public License v3; see LICENSE.
 """Convert a NeonSynth --midilog text log into a Standard MIDI File (.mid).
 
 Usage:
