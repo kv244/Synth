@@ -5,7 +5,7 @@ NeonSynth is a learning synthesizer: a place to hear what a waveform sounds like
 For musicians, begin with one note and one waveform, without stacked oscillator layers obscuring what you are hearing. For coders, follow the same sound into the C++ implementation, from waveform generation through envelope, filter, and output; the interface and the code become two views of the same instrument ([voice architecture](https://github.com/kv244/Synth/blob/9a21c0ed95c283c0027158ee6df686dc7fa03b6d/NeonSynthVoice.h)).
 
 **Instrument:** NeonSynth by Razvan Julian Petrescu / AudioDSP  
-**Edition:** 1.0, prepared 7 November 2026  
+**Edition:** 1.1, updated 7 November 2026<br>
 **Applies to:** NeonSynth v1.5.0, source revision `9a21c0ed95c283c0027158ee6df686dc7fa03b6d`  
 **Formats:** VST3 instrument and standalone application; a Windows installer is supplied for this release ([v1.5.0 release](https://github.com/kv244/Synth/releases/tag/v1.5.0)).
 
@@ -109,6 +109,10 @@ Keep one waveform and one cutoff setting, then compare a fast attack with a slow
 Only after those differences become familiar should you add chords, sequencing, and other source engines. This is a suggested learning order rather than a restriction on the instrument.
 
 ## Finding your way around
+
+![NeonSynth main interface showing the oscillator waveform selector, amplitude envelope, low-pass filter, voice indicators, output scope and meters, and 16-step sequencer.](https://raw.githubusercontent.com/kv244/Synth/9a21c0ed95c283c0027158ee6df686dc7fa03b6d/screenshot.png)
+
+Figure 1. Main interface overview, reproduced from the repository's reference screenshot. This image shows an earlier build, with “BasicSynth” in the window title; v1.5.0 also includes the Source selector and the Sample/Granular strip described in this manual ([project screenshot and version guide](https://github.com/kv244/Synth)).
 
 The interface groups sound generation and shaping on the left, output monitoring on the right, sample controls below them, and sequencing along the bottom. Control colours provide additional guidance: cyan for source/output functions, amber for the envelope and sequencer, and magenta for filtering and granular parameters ([interface implementation](https://github.com/kv244/Synth/blob/9a21c0ed95c283c0027158ee6df686dc7fa03b6d/NeonSynthEditor.h)).
 
