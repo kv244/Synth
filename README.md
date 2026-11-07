@@ -9,6 +9,10 @@
 A futuristic, neon-styled virtual analog synthesizer built with JUCE and C++17,
 by **Razvan Julian Petrescu** / **AudioDSP**.
 
+**[Read the NeonSynth User Manual](docs/NeonSynth-User-Manual.md)** for setup,
+waveform-listening exercises, the illustrated control guide and a tour of the
+C++ source. Learn the sound as a musician, or explore how it works as a coder.
+
 ![Neon Synth screenshot](screenshot.png)
 
 ## Features
