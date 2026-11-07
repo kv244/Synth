@@ -33,6 +33,22 @@ by **Razvan Julian Petrescu** / **AudioDSP**.
 
 ---
 
+## User manual: learn by listening, explore the code
+
+The **[NeonSynth User Manual](docs/NeonSynth-User-Manual.md)** positions NeonSynth
+as a learning synthesizer for musicians and coders. For musicians, guided
+listening exercises compare individual waveforms before introducing filtering,
+envelopes, sample playback and granular synthesis. Each oscillator voice starts
+with one selected waveform, keeping the comparison clear; the instrument still
+supports 16-note polyphony.
+
+For coders, the manual maps the controls and signal path to the C++ source,
+with a suggested reading path and small, testable experiments. It also covers
+installation, sequencing, session saving, sound-design starting points and
+troubleshooting.
+
+---
+
 ## Download
 
 Pre-built Windows installer: **[Latest release →](https://github.com/kv244/Synth/releases/latest)**
