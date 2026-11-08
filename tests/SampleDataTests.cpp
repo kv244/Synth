@@ -196,6 +196,22 @@ int main()
         auto b = SampleLoader::makeDefaultSample();
         check (a != nullptr && a->getOrigin().isDefault && a->getEmbeddedFlac().getSize() == 0, "the pad is marked as the default and is never embedded");
         check (a->getHash() == b->getHash(), "the pad is identical every time it is made");
+
+        // Sessions that use the pad don't store it (they save default="1"), so it must stay the
+        // same sound in every version. SampleLoader renders it with a frozen copy of the v1.5.0
+        // oscillator, so improvements to the live one can't change it. These are its hashes in
+        // v1.5.0, one per platform: it is computed with std::sin and std::tan, whose last bits
+        // differ between MSVC's and glibc's maths libraries.
+       #if JUCE_WINDOWS
+        const juce::String v150PadHash = "9bbd2e8fe006ea2c";
+       #elif JUCE_LINUX
+        const juce::String v150PadHash = "bc3a2be832d2400d";
+       #else
+        const juce::String v150PadHash = a->getHash();   // no v1.5.0 reference recorded for this platform
+       #endif
+        char padWhat[160];
+        std::snprintf (padWhat, sizeof (padWhat), "the pad is the same sound as in v1.5.0 (hash %s)", a->getHash().toRawUTF8());
+        check (a->getHash() == v150PadHash, padWhat);
         check (std::abs (a->getLengthSeconds() - 4.0) < 1.0e-9, "the pad is 4 s long");
 
         const int n = a->getLength();
