@@ -712,6 +712,52 @@ def test_chop_state(plugin):
             f"all chopped {closed_level:.5f}  v1.5 state -> default")
 
 
+def test_sculpt(plugin):
+    """A chopped, noisy, folded sawtooth keeps its pitch and gains upper harmonics.
+
+    C4 on a sawtooth is rendered plain and with CHOP (Overtone 100%, Comb 2),
+    Fold (Drive 4, Mix 100%) and a little Noise (10%). The FFT peak below 1 kHz
+    must stay on a harmonic of C4, and the sculpted version must carry more of
+    its energy above 2 kHz than the plain one."""
+    saved = {name: p.raw_value for name, p in plugin.parameters.items()}
+    try:
+        def render(sculpted: bool) -> np.ndarray:
+            set_params(plugin, filter_on=False)
+            plugin.parameters["source"].raw_value = 0.0                  # Oscillator
+            plugin.parameters["waveform"].raw_value = 1.0                # Sawtooth
+            plugin.chop_overtone = 100.0 if sculpted else 0.0
+            plugin.chop_comb = 2
+            plugin.noise = 10.0 if sculpted else 0.0
+            plugin.fold_drive = 4.0
+            plugin.fold_mix = 100.0 if sculpted else 0.0
+            audio = plugin.process([mido.Message("note_on", note=60, velocity=100, time=0.0)], 1.5, SAMPLE_RATE, reset=True)
+            return audio[0, int(0.3 * SAMPLE_RATE):].astype(np.float64)
+
+        plain, sculpted = render(False), render(True)
+
+        def spectrum(x):
+            return np.abs(np.fft.rfft(x * np.hanning(len(x)))) ** 2, np.fft.rfftfreq(len(x), 1 / SAMPLE_RATE)
+
+        power, freqs = spectrum(sculpted)
+        low = (freqs > 100) & (freqs < 1000)
+        peak = freqs[low][np.argmax(power[low])]
+        harmonic = peak / 261.6256
+        assert abs(harmonic - round(harmonic)) < 0.02, f"strongest low partial {peak:.1f} Hz is not a harmonic of C4"
+
+        def upper_share(x):
+            p, f = spectrum(x)
+            return p[f > 2000].sum() / p.sum()
+        plain_share, sculpted_share = upper_share(plain), upper_share(sculpted)
+        assert sculpted_share > 1.5 * plain_share, \
+            f"sculpting should add upper harmonics: {100 * sculpted_share:.1f}% above 2 kHz vs {100 * plain_share:.1f}% plain"
+        assert np.all(np.isfinite(sculpted)) and np.max(np.abs(sculpted)) < 1.0, "sculpted output is not finite or not below full scale"
+    finally:
+        for name, value in saved.items():
+            plugin.parameters[name].raw_value = value
+    return (f"peak {peak:.1f} Hz (harmonic {round(harmonic)} of C4)  above 2 kHz: "
+            f"{100 * sculpted_share:.1f}% sculpted vs {100 * plain_share:.1f}% plain")
+
+
 def test_granular(plugin):
     """Source = Granular plays a cloud of grains, pitched by the key, and repeats exactly.
 
@@ -873,6 +919,7 @@ TESTS = [
     ("Granular",          test_granular),
     ("Random",            test_random),
     ("Chop state",        test_chop_state),
+    ("Sculpt",            test_sculpt),
     ("Channel 16 key",    test_keyboard_on_sequencer_channel),
     ("Log per instance",  test_midi_log_per_instance),
 ]

@@ -247,6 +247,9 @@ private:
     juce::AudioParameterFloat*  grJitterParameter      = nullptr;
     juce::AudioParameterFloat*  chopOvertoneParameter  = nullptr;
     juce::AudioParameterInt*    chopCombParameter      = nullptr;
+    juce::AudioParameterFloat*  noiseLevelParameter    = nullptr;
+    juce::AudioParameterFloat*  foldDriveParameter     = nullptr;
+    juce::AudioParameterFloat*  foldMixParameter       = nullptr;
 
     /** CHOP's pattern, bit k = step k chopped. Written by the editor, read once per block; lock-free. */
     std::atomic<juce::uint16> chopPattern { ChopSettings().pattern };

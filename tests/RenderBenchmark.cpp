@@ -12,6 +12,7 @@
       16 voices - 16 notes held at full velocity (soft clipper working hard)
       sample 16 - the same 16 notes playing the built-in pad (Source = Sample, looped)
       random 16 - the same 16 notes on the Random source
+      sculpt 16 - the same 16 notes on a sawtooth with CHOP, Noise and Fold all on (v1.6.0)
       granular  - the same 16 notes on the granular source at 200 grains/s of 250 ms,
                   so every voice runs its full 32 grains (the worst case)
       dense     - sequencer at 1/32 and 240 BPM plus an 8-note chord every 250 ms
@@ -100,6 +101,16 @@ int main()
                                  [] (juce::AudioProcessor& p) { setParameter (p, "source", 1.0f); }));   // the built-in pad, looped
     report ("random 16", render (held ({ 48, 50, 52, 53, 55, 57, 59, 60, 62, 64, 65, 67, 69, 71, 72, 74 }, 127),
                                  [] (juce::AudioProcessor& p) { setParameter (p, "source", 3.0f); }));   // the Random source
+    report ("sculpt 16", render (held ({ 48, 50, 52, 53, 55, 57, 59, 60, 62, 64, 65, 67, 69, 71, 72, 74 }, 127),
+                                 [] (juce::AudioProcessor& p)
+                                 {
+                                     setParameter (p, "waveform", 3.0f);         // sawtooth
+                                     setParameter (p, "chopOvertone", 100.0f);   // CHOP, Noise and Fold all on
+                                     setParameter (p, "chopComb", 4.0f);
+                                     setParameter (p, "noiseLevel", 30.0f);
+                                     setParameter (p, "foldDrive", 5.0f);
+                                     setParameter (p, "foldMix", 100.0f);
+                                 }));
     report ("granular", render (held ({ 48, 50, 52, 53, 55, 57, 59, 60, 62, 64, 65, 67, 69, 71, 72, 74 }, 127),
                                 [] (juce::AudioProcessor& p)
                                 {

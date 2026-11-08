@@ -134,6 +134,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout NeonSynthProcessor::createPa
     layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "chopOvertone", 1 }, "Chop Overtone",
                                                         NormalisableRange<float> (0.0f, 200.0f, 0.1f), 0.0f));          // %: chopped steps x (1 - Overtone/100)
     layout.add (std::make_unique<AudioParameterInt>   (ParameterID { "chopComb", 1 }, "Chop Comb", 1, 32, 1));      // pattern repeats per cycle
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "noiseLevel", 1 }, "Noise",
+                                                        NormalisableRange<float> (0.0f, 100.0f, 0.1f), 0.0f));          // %: crossfade to white noise
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "foldDrive", 1 }, "Fold Drive",
+                                                        NormalisableRange<float> (1.0f, 10.0f, 0.01f), 3.0f));
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "foldMix", 1 }, "Fold Mix",
+                                                        NormalisableRange<float> (0.0f, 100.0f, 0.1f), 0.0f));          // %: 0 skips the fold
     return layout;
 }
 
@@ -187,6 +193,9 @@ NeonSynthProcessor::NeonSynthProcessor()
     grJitterParameter      = getTypedParameter<juce::AudioParameterFloat>  (apvts, "grJitter");
     chopOvertoneParameter  = getTypedParameter<juce::AudioParameterFloat>  (apvts, "chopOvertone");
     chopCombParameter      = getTypedParameter<juce::AudioParameterInt>    (apvts, "chopComb");
+    noiseLevelParameter    = getTypedParameter<juce::AudioParameterFloat>  (apvts, "noiseLevel");
+    foldDriveParameter     = getTypedParameter<juce::AudioParameterFloat>  (apvts, "foldDrive");
+    foldMixParameter       = getTypedParameter<juce::AudioParameterFloat>  (apvts, "foldMix");
 
     loadDefaultPattern();
     publishSample (SampleLoader::makeDefaultSample());
@@ -258,6 +267,7 @@ void NeonSynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
     params.grainSettings  = { grPosParameter->get(), grScanParameter->get(), grSizeParameter->get() * 0.001f,
                               grDensityParameter->get(), grSprayParameter->get(), grJitterParameter->get() };
     params.chop = { chopPattern.load (std::memory_order_relaxed), chopCombParameter->get(), chopOvertoneParameter->get() * 0.01f };
+    params.sculpt = { noiseLevelParameter->get() * 0.01f, foldDriveParameter->get(), foldMixParameter->get() * 0.01f };
 
     // Every voice shares the same settings. TODO: per-voice detune for unison, or extra harmonics.
     for (auto* v : voices)
