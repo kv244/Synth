@@ -72,6 +72,8 @@ public:
         static constexpr int maxShownGrains = 8;
         std::array<float, maxShownGrains> grainPositions {};   // read positions 0..1 of up to 8 sounding grains
         int numGrains = 0;
+        bool playingRandom = false;      // the note plays the Random source
+        std::array<float, RandomStepOscillator::numSteps> randomLevels {};   // its current 16 levels (for the shape view)
     };
 
     Telemetry getTelemetry() const noexcept
@@ -85,6 +87,9 @@ public:
         t.samplePosition  = t.active && source == Source::sample && reader.isActive() && ! reader.hasFinished()
                               ? reader.getPosition() : -1.0f;
         t.numGrains       = t.active && cloud.isActive() ? cloud.getGrainPositions (t.grainPositions.data(), Telemetry::maxShownGrains) : 0;
+        t.playingRandom   = t.active && source == Source::random;
+        if (t.playingRandom)
+            t.randomLevels = randomOscillator.getLevels();
         return t;
     }
 

@@ -124,6 +124,11 @@ private:
             "Replace: the pattern only; keyboard notes are ignored.",
             "Transpose: the pattern plays while you hold a key, shifted by that key's distance from C4 (hold C5 for an octave up)." } }, neon::amber);
 
+        addSection (columns[0], { "SHAPE (Oscillator and Random)", {
+            "The strip shows one cycle of the wave after CHOP and Fold. Click a step to chop it; drag across steps to set several.",
+            "OVERTONE: how far the shaded steps are cut (100% silences them, 200% turns them upside down). COMB repeats the pattern within each cycle.",
+            "NOISE fades the wave into white noise. FOLD folds it back on itself for brighter harmonics; DRIVE sets how hard." } }, neon::cyan);
+
         // Right column: the synth and getting sound out.
         addSection (columns[1], { "SOUND", {
             "SOURCE: the oscillator (its Waveform), Random (16 drifting steps), the sample, or Granular: grains of it.",

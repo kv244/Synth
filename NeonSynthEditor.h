@@ -9,6 +9,7 @@
 #include "SequencerView.h"
 #include "HelpOverlay.h"
 #include "SampleView.h"
+#include "ShapeView.h"
 
 /**
     Neon Synth editor.
@@ -39,7 +40,7 @@ class NeonSynthEditor : public juce::AudioProcessorEditor,
 {
 public:
     explicit NeonSynthEditor (NeonSynthProcessor& p)
-        : AudioProcessorEditor (&p), processor (p), apvts (p.getAPVTS()), sampleView (p, p.getAPVTS()), stepGrid (p)
+        : AudioProcessorEditor (&p), processor (p), apvts (p.getAPVTS()), sampleView (p, p.getAPVTS()), shapeView (p, p.getAPVTS()), stepGrid (p)
     {
         backgroundImage = juce::ImageCache::getFromMemory (BinaryData::gui_background_png,
                                                            BinaryData::gui_background_pngSize);
@@ -66,6 +67,11 @@ public:
         grDensityValue   = apvts.getRawParameterValue ("grDensity");
         grSprayValue     = apvts.getRawParameterValue ("grSpray");
         grJitterValue    = apvts.getRawParameterValue ("grJitter");
+        chopOvertoneValue = apvts.getRawParameterValue ("chopOvertone");
+        chopCombValue     = apvts.getRawParameterValue ("chopComb");
+        noiseValue        = apvts.getRawParameterValue ("noiseLevel");
+        foldDriveValue    = apvts.getRawParameterValue ("foldDrive");
+        foldMixValue      = apvts.getRawParameterValue ("foldMix");
 
         // ── Oscillator ───────────────────────────────────────────────────────
         addAndMakeVisible (waveformCombo);
@@ -88,6 +94,7 @@ public:
 
         // ── Sample ───────────────────────────────────────────────────────────
         addAndMakeVisible (sampleView);
+        addChildComponent (shapeView);   // in the sample view's place while Oscillator or Random plays
         setUpReadout (sampleNameLabel, neon::cyan, juce::Justification::centredLeft);
         sampleNameLabel.setInterceptsMouseClicks (true, false);   // so its tooltip (the full path) shows
         setUpReadout (sampleStatusLabel, neon::red, juce::Justification::centredRight);
@@ -150,22 +157,50 @@ public:
         grSprayKnob.setTooltip ("Spray: how far each grain may start from the cloud's position");
         grJitterKnob.setTooltip ("Pitch jitter: random detune of each grain, in cents");
 
+        // Waveform sculpting (v1.6.0): the knob row while Oscillator or Random plays.
+        const std::pair<juce::Slider*, const char*> shapeKnobs[] = {
+            { &chopOvertoneKnob, "chopOvertone" }, { &chopCombKnob, "chopComb" }, { &noiseKnob, "noiseLevel" },
+            { &foldDriveKnob, "foldDrive" }, { &foldMixKnob, "foldMix" } };
+        for (size_t i = 0; i < std::size (shapeKnobs); ++i)
+        {
+            auto* knob = shapeKnobs[i].first;
+            knob->setSliderStyle (juce::Slider::Rotary);
+            knob->setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
+            knob->setColour (juce::Slider::rotarySliderFillColourId,    neon::cyan);
+            knob->setColour (juce::Slider::rotarySliderOutlineColourId, neon::cyan.withAlpha (0.3f));
+            knob->setColour (juce::Slider::thumbColourId,               neon::cyan);
+            addChildComponent (knob);
+            shapeKnobAttachments[i] = std::make_unique<SliderAttachment> (apvts, shapeKnobs[i].second, *knob);
+        }
+        chopOvertoneKnob.setTooltip ("Overtone: how far CHOP cuts the shaded steps. 0% leaves them, 100% silences them, 200% turns them upside down");
+        chopCombKnob.setTooltip ("Comb: repeats the 16-step pattern this many times per cycle, for metallic tones");
+        noiseKnob.setTooltip ("Noise: crossfades the wave towards white noise, keeping the level steady");
+        foldDriveKnob.setTooltip ("Drive: how hard the wavefolder folds the wave back on itself");
+        foldMixKnob.setTooltip ("Fold: how much of the folded wave to hear. 0% switches the folder off");
+        for (auto* label : { &chopOvertoneReadout, &chopCombReadout, &noiseReadout, &foldDriveReadout, &foldMixReadout })
+            setUpReadout (*label, neon::cyan, juce::Justification::centred);
+
         for (auto* label : { &smpRootReadout, &smpStartReadout, &smpLoopStartReadout, &smpLoopEndReadout, &smpXfadeReadout,
                              &grPosReadout, &grScanReadout, &grSizeReadout, &grDensityReadout, &grSprayReadout, &grJitterReadout })
             setUpReadout (*label, neon::cyan, juce::Justification::centred);
         for (auto* label : { &grPosReadout, &grScanReadout, &grSizeReadout, &grDensityReadout, &grSprayReadout, &grJitterReadout })
             label->setColour (juce::Label::textColourId, neon::magenta);
 
-        // Waveform only applies to the oscillator, the loop mode only to Sample, and the
-        // knob row follows the source: Sample's knobs, or Granular's.
+        // Waveform only applies to the oscillator, the loop mode only to Sample, and the strip
+        // follows the source: Sample's knobs, Granular's, or (Oscillator and Random) the shape view
+        // with the sculpting knobs.
         sourceListener = std::make_unique<juce::ParameterAttachment> (
             *apvts.getParameter ("source"),
             [this] (float value)
             {
                 const int source = juce::roundToInt (value);
+                const auto mode = source == 1 ? StripMode::sample : source == 2 ? StripMode::granular : StripMode::shape;
                 waveformCombo.setAlpha (source == 0 ? 1.0f : 0.45f);
-                smpLoopCombo.setAlpha (source == 2 ? 0.45f : 1.0f);
-                if (std::exchange (granularShown, source == 2) != granularShown && getWidth() > 0)
+                smpLoopCombo.setAlpha (mode == StripMode::sample ? 1.0f : 0.45f);
+                sampleNameLabel.setAlpha (mode == StripMode::shape ? 0.45f : 1.0f);
+                sampleView.setVisible (mode != StripMode::shape);
+                shapeView.setVisible (mode == StripMode::shape);
+                if (std::exchange (stripMode, mode) != stripMode && getWidth() > 0)
                 {
                     resized();
                     repaint();
@@ -387,6 +422,7 @@ public:
         place (smpLoopCombo,      430, 400, 150, 22);
         place (sampleStatusLabel, 586, 403, 154, 16);
         place (sampleView,        30, 428, 390, 62);
+        place (shapeView,         30, 428, 390, 62);
 
         for (const auto& slot : allKnobSlots())
         {
@@ -424,7 +460,8 @@ public:
                              &cutoffReadout, &gainReadout, &widthReadout,
                              &seqTempoReadout, &seqSwingReadout, &seqGateReadout, &sampleNameLabel, &sampleStatusLabel,
                              &smpRootReadout, &smpStartReadout, &smpLoopStartReadout, &smpLoopEndReadout, &smpXfadeReadout,
-                             &grPosReadout, &grScanReadout, &grSizeReadout, &grDensityReadout, &grSprayReadout, &grJitterReadout })
+                             &grPosReadout, &grScanReadout, &grSizeReadout, &grDensityReadout, &grSprayReadout, &grJitterReadout,
+                             &chopOvertoneReadout, &chopCombReadout, &noiseReadout, &foldDriveReadout, &foldMixReadout })
             label->setFont (neon::font (11.0f * s));
     }
 
@@ -461,12 +498,12 @@ public:
         g.drawHorizontalLine (394, 30.0f, 740.0f);
         g.setColour (neon::cyan);
         g.setFont (neon::font (13.0f));
-        g.drawText ("SAMPLE", 30, 401, 70, 20, juce::Justification::left);
+        g.drawText (stripMode == StripMode::shape ? "SHAPE" : "SAMPLE", 30, 401, 70, 20, juce::Justification::left);
         g.setFont (neon::font (11.0f));
         const auto row = knobRow();
         for (size_t i = 0; i < row.size(); ++i)
         {
-            g.setColour (row[i].knob == &smpRootKnob || ! granularShown ? neon::cyan : neon::magenta);
+            g.setColour (row[i].knob == &smpRootKnob || stripMode != StripMode::granular ? neon::cyan : neon::magenta);
             g.drawText (row[i].name, rowKnobX ((int) i, (int) row.size()), 465, knobWidth ((int) row.size()), 13, juce::Justification::centred);
         }
 
@@ -500,12 +537,21 @@ private:
 
     float scale() const noexcept { return (float) getWidth() / (float) baseWidth; }
 
-    // The knob row of the sample strip: Sample's five knobs, or Granular's seven (sharing ROOT).
+    // The knob row of the sample strip: Sample's five knobs, Granular's seven (sharing ROOT),
+    // or the five sculpting knobs while Oscillator or Random plays.
     struct KnobSlot { juce::Slider* knob; juce::Label* readout; const char* name; };
+    enum class StripMode { sample, granular, shape };
 
-    std::vector<KnobSlot> knobRow()
+    std::vector<KnobSlot> knobRow() { return knobRowFor (stripMode); }
+
+    std::vector<KnobSlot> knobRowFor (StripMode mode)
     {
-        if (granularShown)
+        if (mode == StripMode::shape)
+            return { { &chopOvertoneKnob, &chopOvertoneReadout, "OVERTONE" }, { &chopCombKnob, &chopCombReadout, "COMB" },
+                     { &noiseKnob, &noiseReadout, "NOISE" }, { &foldDriveKnob, &foldDriveReadout, "DRIVE" },
+                     { &foldMixKnob, &foldMixReadout, "FOLD" } };
+
+        if (mode == StripMode::granular)
             return { { &smpRootKnob, &smpRootReadout, "ROOT" }, { &grPosKnob, &grPosReadout, "POS" },
                      { &grScanKnob, &grScanReadout, "SCAN" }, { &grSizeKnob, &grSizeReadout, "SIZE" },
                      { &grDensityKnob, &grDensityReadout, "DENS" }, { &grSprayKnob, &grSprayReadout, "SPRAY" },
@@ -518,11 +564,12 @@ private:
 
     std::vector<KnobSlot> allKnobSlots()
     {
-        auto all = knobRow();
-        granularShown = ! granularShown;
-        const auto other = knobRow();
-        granularShown = ! granularShown;
-        all.insert (all.end(), other.begin(), other.end());
+        std::vector<KnobSlot> all;
+        for (const auto mode : { StripMode::sample, StripMode::granular, StripMode::shape })
+        {
+            const auto row = knobRowFor (mode);
+            all.insert (all.end(), row.begin(), row.end());
+        }
         return all;
     }
 
@@ -670,6 +717,12 @@ private:
         set (grSprayReadout,   percent (grSprayValue->load()));
         set (grJitterReadout,  juce::String (juce::roundToInt (grJitterValue->load())) + " ct");
 
+        set (chopOvertoneReadout, juce::String (juce::roundToInt (chopOvertoneValue->load())) + "%");
+        set (chopCombReadout,     "x" + juce::String (juce::roundToInt (chopCombValue->load())));
+        set (noiseReadout,        juce::String (juce::roundToInt (noiseValue->load())) + "%");
+        set (foldDriveReadout,    juce::String (foldDriveValue->load(), 1));
+        set (foldMixReadout,      juce::String (juce::roundToInt (foldMixValue->load())) + "%");
+
         const auto status = processor.getSampleStatus();
         // Re-fitted only when the text or the label's size changes (it measures glyphs).
         const auto details = "  " + juce::String (status.seconds, 1) + " s  " + formatSampleRate (status.sampleRate);
@@ -713,6 +766,7 @@ private:
         voiceLeds.update (voices);
         stepGrid.refresh();   // pattern + playhead
         sampleView.refresh(); // sample, markers, playheads
+        shapeView.refresh();  // the sculpted cycle, CHOP's steps
         updateReadouts();
     }
 
@@ -742,6 +796,11 @@ private:
     std::atomic<float>* grDensityValue = nullptr;
     std::atomic<float>* grSprayValue = nullptr;
     std::atomic<float>* grJitterValue = nullptr;
+    std::atomic<float>* chopOvertoneValue = nullptr;
+    std::atomic<float>* chopCombValue = nullptr;
+    std::atomic<float>* noiseValue = nullptr;
+    std::atomic<float>* foldDriveValue = nullptr;
+    std::atomic<float>* foldMixValue = nullptr;
 
     // Visualisers and their data
     SignalHistory    history;
@@ -780,7 +839,11 @@ private:
     juce::Slider     grPosKnob, grScanKnob, grSizeKnob, grDensityKnob, grSprayKnob, grJitterKnob;
     juce::Label      grPosReadout, grScanReadout, grSizeReadout, grDensityReadout, grSprayReadout, grJitterReadout;
     std::array<std::unique_ptr<SliderAttachment>, 6> grainKnobAttachments;
-    bool granularShown = false;   // the knob row shows Granular's knobs
+    ShapeView        shapeView;
+    juce::Slider     chopOvertoneKnob, chopCombKnob, noiseKnob, foldDriveKnob, foldMixKnob;
+    juce::Label      chopOvertoneReadout, chopCombReadout, noiseReadout, foldDriveReadout, foldMixReadout;
+    std::array<std::unique_ptr<SliderAttachment>, 5> shapeKnobAttachments;
+    StripMode stripMode = StripMode::shape;   // what the sample strip shows (follows Source)
     std::unique_ptr<juce::FileChooser> chooser;
     juce::String fittedFor;      // the sample label's last unshortened text, and the width it was fitted to
     int fittedWidth = -1;

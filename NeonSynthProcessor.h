@@ -86,8 +86,14 @@ public:
         std::atomic<float> secondsSinceOff { -1.0f };
         std::atomic<float> samplePosition { -1.0f };   // 0..1 while playing the sample, else -1
         std::array<std::atomic<float>, NeonSynthVoice::Telemetry::maxShownGrains> grainPositions;   // 0..1 per sounding grain, else -1
+        std::atomic<bool>  playingRandom { false };
+        std::array<std::atomic<float>, RandomStepOscillator::numSteps> randomLevels;   // valid while playingRandom
 
-        VoiceView() { for (auto& g : grainPositions) g.store (-1.0f); }
+        VoiceView()
+        {
+            for (auto& g : grainPositions) g.store (-1.0f);
+            for (auto& l : randomLevels)   l.store (0.0f);
+        }
     };
 
     const std::array<VoiceView, numVoices>& getVoiceViews() const noexcept { return voiceViews; }
