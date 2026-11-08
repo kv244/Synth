@@ -5,13 +5,15 @@ NeonSynth is a learning synthesizer: a place to hear what a waveform sounds like
 For musicians, begin with one note and one waveform, without stacked oscillator layers obscuring what you are hearing. For coders, follow the same sound into the C++ implementation, from waveform generation through envelope, filter, and output; the interface and the code become two views of the same instrument ([voice architecture](https://github.com/kv244/Synth/blob/v1.6.0/NeonSynthVoice.h)).
 
 **Instrument:** NeonSynth by Razvan Julian Petrescu / AudioDSP  
-**Edition:** 1.2, updated 8 November 2026<br>
+**Edition:** 1.3, updated 8 November 2026 (illustrations revised for print; the instrument version is unchanged)<br>
 **Applies to:** NeonSynth v1.6.0, source tag `v1.6.0`  
 **Formats:** VST3 instrument and standalone application; a Windows installer is supplied for this release ([v1.6.0 release](https://github.com/kv244/Synth/releases/tag/v1.6.0)).
 
 ### About this manual
 
 The instructions were checked against the v1.6.0 source code. Every recipe in the sound-design chapter was rendered through the v1.6.0 plugin, to confirm that it sounds, releases cleanly to silence and stays clear of the output soft clipper. This is not a certification of compatibility with every audio device or DAW.
+
+Each figure is labelled by how it was made: **Actual application capture** (a screenshot of the running instrument, with numbered callouts added), **Plot derived from rendered audio** (measured from sound the plugin produced, with the settings stated), or **Explanatory schematic** (a drawing that explains an idea and is not a measurement). How to regenerate them is in [figures/README.md](figures/README.md).
 
 The sound-design settings are starting points, not factory presets. Begin at a low listening level and adjust by ear.
 
@@ -97,6 +99,10 @@ If one option sounds louder, lower the listening level rather than treating extr
 
 Ask yourself: which sounds smoothest, which feels hollow, and which has the most edge? These are listening prompts, not right-or-wrong labels; the point is to develop your own recognition of each shape.
 
+![Four rows, one for each of Sine, Triangle, Square and Sawtooth. Each row shows three cycles of the waveform on the left and its harmonic spectrum on the right. The sine has one spectral line; the triangle and square have odd harmonics only, falling away quickly in the triangle; the sawtooth has every harmonic.](images/fig02-waveforms.png)
+
+Figure 2. The four waveforms at A4 (440 Hz). *Plot derived from rendered audio:* each row was rendered through the v1.6.0 plugin at 48 kHz with the settings of the exercise above (ATK 5 ms, DEC 100 ms, SUS 100%, REL 150 ms, filter off, WIDTH 0%, GAIN 0 dB, velocity 100). The waveform is the first 6.8 ms of the steady note; the spectrum is analysed from 1.0 to 1.5 s with a Blackman-Harris window. All rows share the same scales and none is normalised, so heights are directly comparable. Under each row the figure repeats the listening prompt.
+
 ### Listening exercise: hear what a filter removes
 
 Keep the note and envelope unchanged, choose Sawtooth, then enable the filter and slowly move Cutoff down and back up. Switch to Sine and repeat the sweep, observing both the audible change and the spectrum display.
@@ -111,9 +117,9 @@ Only after those differences become familiar should you add chords, sequencing, 
 
 ## Finding your way around
 
-![NeonSynth v1.5.0 main interface with Source set to Granular: amplitude envelope, low-pass filter, voice lights, output scope and meters, the sample strip with the grain cloud and its knobs, and the running 16-step sequencer.](../screenshot.png)
+![The NeonSynth window with eight numbered regions: 1 source and waveform menus, 2 envelope graph and knobs, 3 low-pass filter, 4 voice lights, 5 output scope and level meters, 6 gain and width, 7 the SHAPE strip, 8 the step sequencer.](images/fig01-interface.png)
 
-Figure 1. NeonSynth with **Source** set to **Granular** and the sequencer running (captured in v1.5.0; this view is unchanged in v1.6.0). The sample strip shows the built-in pad with the grain cloud: the magenta line is POS, the shaded band is the reach of SPRAY, and each white tick is a sounding grain.
+Figure 1. The main window (v1.6.0, Source set to Oscillator, Sawtooth, with the sequencer running). *Actual application capture; the numbered outlines and the key below the picture were added.* Regions 1–8 are explained in the key, and the window is described control by control in the table below.
 
 The interface groups sound generation and shaping on the left, output monitoring on the right, the sample or shape strip below them, and sequencing along the bottom. Control colours provide additional guidance: cyan for source/output functions, amber for the envelope and sequencer, and magenta for filtering and granular parameters.
 
@@ -162,9 +168,9 @@ The engine is selected at note-on, so changing **Source** does not immediately c
 
 With **Source** set to **Oscillator** or **Random**, three stages can reshape the wave before it reaches the envelope: **CHOP** cuts or flips parts of every cycle, **NOISE** blends in white noise, and **FOLD** folds the wave back on itself. All three start neutral, so they change nothing until you turn them up. They do not apply to Sample or Granular.
 
-![The SHAPE strip with a sawtooth: chopped steps shaded amber and cut to silence at OVERTONE 100%, the wave folded at FOLD 100%, and the five sculpting knobs.](shape-strip.png)
+![The SHAPE strip with a sawtooth: chopped steps shaded amber and cut to silence at OVERTONE 100%, the wave folded at FOLD 100%, and the five sculpting knobs.](images/fig03-shape-strip.png)
 
-Figure 2. The SHAPE strip with a sawtooth, OVERTONE 100% and FOLD 100%. The shaded steps are chopped, so the wave is cut to the centre line there; the folded curve between them is the sawtooth after FOLD. The first step has been clicked open.
+Figure 3. The SHAPE strip with a sawtooth, OVERTONE 100% and FOLD 100%. *Actual application capture.* The shaded steps are chopped, so the wave is cut to the centre line there; the folded curve between them is the sawtooth after FOLD. The first step has been clicked open.
 
 ### The SHAPE strip
 
@@ -241,13 +247,25 @@ For a pluck, try a short attack, a moderate decay, and low sustain; for a pad, t
 
 The envelope graph shows the shape and the positions of sounding voices. Sustain changes are smoothed, and a note released during Attack or Decay still begins its release from the level it has reached.
 
+![Two level-against-time graphs. Top: a note held for 1.2 s rises linearly to a peak in 300 ms, falls to the sustain level of 50% in 300 ms, holds, and falls to zero in 500 ms after the key is released. Bottom: a note released after 150 ms, during the attack, falls from the level it had reached, 50%, to zero in 500 ms.](images/fig04-envelope.png)
+
+Figure 4. The amplitude envelope. *Plot derived from rendered audio:* a sine at A6 was rendered at 48 kHz with ATK 300 ms, DEC 300 ms, SUS 50% and REL 500 ms, and the plot shows the peak level in each 2 ms frame, scaled so that 1 is the attack peak. Both curves are measured, not drawn: the sustain measures 50.1% and the early release starts from 50.0%. The labels and the dotted key-down and key-up lines were added.
+
 ### Low-pass filter
 
 Enable **ON** to use the filter, then lower **Cutoff** to remove more high-frequency content; disable **ON** to bypass it. The cutoff range is 20 Hz–20 kHz, initially 2 kHz, although the engine limits the actual frequency to 45% of the audio sample rate when necessary.
 
 The filter is a two-pole low-pass with fixed Q, not a user-adjustable resonant ladder filter. There is no separate resonance control or dedicated filter envelope in this version.
 
+![Top: three cycles of a sawtooth at 220 Hz with the filter off (a straight ramp with a sharp drop) and with the filter on at a 1 kHz cutoff (the same ramp with rounded corners). Bottom: the spectrum of both, the filtered one falling below the unfiltered one above the 1 kHz cutoff mark.](images/fig05-filter.png)
+
+Figure 5. What the low-pass filter removes. *Plot derived from rendered audio:* a sawtooth at A3 (220 Hz) rendered at 48 kHz, velocity 100, once with the filter bypassed and once with the cutoff at 1 kHz; the same scales are used in every panel and nothing is normalised. The measured attenuation is about 3 dB at the cutoff and about 24 dB at 4 kHz, which is what a two-pole low-pass (12 dB per octave) gives.
+
 ## Sample playback
+
+![The Sample and Granular control strips of the window. Panel a, Source Sample: numbered outlines on the LOAD, PAD and loop menu, the waveform, and the ROOT, START, L.START, L.END and XFADE knobs. Panel b, Source Granular: the same for the waveform with its POS line and SPRAY band, and the ROOT, POS, SCAN, SIZE, DENS, SPRAY and JITTER knobs.](images/fig06-sample-granular-ui.png)
+
+Figure 6. The sample strip with **Source** set to **Sample** (a) and to **Granular** (b), with the built-in pad loaded. *Actual application capture; the numbered outlines and keys were added.* The same strip serves both sources, and the knob row changes with the source. Figure 7 draws what these controls do.
 
 ### Load a recording
 
@@ -309,6 +327,10 @@ Select **Source → Granular** after loading a recording or restoring **PAD**. T
 
 At **SCAN = 0**, the selection position does not advance automatically, but the grains still play and new grains continue to be generated. Positive SCAN moves selection forward through the file; negative SCAN moves it backwards, which is not the same as reversing audio playback inside each grain.
 
+![Explanatory drawing in five parts over the waveform of the built-in pad. a: where a Sample note reads, from START, and loops between L.START and L.END. b: the loop crossfade, two curves that trade places over the XFADE time. c: where Granular takes grains, a band of SPRAY around POS, with SCAN below zero moving the selection backwards. d: the window shape of one grain. e: the read position over time in One-shot, Loop and Loop until release modes.](images/fig07-sample-granular-schematic.png)
+
+Figure 7. Where Sample and Granular read. *Explanatory schematic:* the positions, the spray range and the grains are example values drawn to explain the controls, not a measurement of a playing voice. The waveform behind panels a and c is real: it is the built-in pad as rendered through the plugin. The crossfade curves are the equal-power cosine and sine curves the loop uses, and the grain is drawn with the window shape the engine applies.
+
 Drag the magenta position marker to explore different regions, then add SPRAY to vary which nearby fragments are chosen. Grain settings shape newly generated grains rather than rewriting fragments already playing, so changes unfold across the cloud instead of replacing it abruptly.
 
 Granular mode uses the sample as a whole rather than the Sample engine's loop region; the loop-mode selector is dimmed in this mode. ROOT is shared with Sample playback, but Sample START, loop boundaries, and XFADE are not granular loop controls.
@@ -346,6 +368,10 @@ For a straightforward 16-step loop in 4/4, begin with **1/16**, zero swing, and 
 | Shift + mouse wheel | Changes velocity in increments of four. |
 
 The grid supports MIDI notes 0–127 and enabled-step velocities 1–127; the cyan outline marks the current step, and each cell's lower bar indicates its velocity.
+
+![The 16-step grid, with numbered pointers to an enabled step, a disabled step, a note name, a velocity bar and the playhead, and a list of the mouse and wheel gestures.](images/fig08-sequencer.png)
+
+Figure 8. The step grid. *Actual application capture; the numbered pointers and the gesture key were added.* The gestures are those in the table above, as coded in the step view: one semitone for every 6 pixels of vertical drag, velocity changes of one for each pixel of Shift-drag or right-drag, and steps of four for Shift with the wheel.
 
 To create a new pattern, first switch unwanted steps off, drag the remaining steps to their pitches, and adjust their velocities for accents. There is no separate pattern-bank or pattern-length control in this version.
 
