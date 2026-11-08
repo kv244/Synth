@@ -126,6 +126,113 @@ struct Blep4
     };
 };
 
+/** CHOP's settings, shared by every voice; read once per block. */
+struct ChopSettings
+{
+    juce::uint16 pattern = 0xAAAA;   ///< bit k set = step k (0..15) chopped; default every second step
+    int   comb     = 1;              ///< the pattern repeats this many times per cycle (1..32)
+    float overtone = 0.0f;           ///< 0..2: a chopped step is scaled by 1 - overtone (0 = no chop)
+};
+
+/**
+    CHOP, after the Roland S-1's OSC CHOP: cuts each cycle of a wave into 16 x Comb
+    equal steps and scales the steps the pattern marks by 1 - Overtone (unchanged at
+    0%, silent at 100%, phase-inverted at 200%).
+
+    Where the gain changes at a step edge, the wave jumps by its value there times
+    the change in gain; the same 4-point residual as the oscillator's own edges
+    smooths that jump. A step shorter than four samples can't be smoothed properly,
+    so CHOP fades out as steps shrink from four samples to two (at high notes and
+    high Comb), instead of the S-1's hard cut-off above 1 kHz.
+
+    The pattern and Comb change only at a cycle boundary, so an edge never changes
+    while it is being corrected; Overtone glides over 10 ms. With Overtone at 0 and
+    not gliding, apply() returns its input untouched (bit-identical to no CHOP).
+
+    Audio thread only; no allocation.
+*/
+class Chop
+{
+public:
+    static constexpr int stepsPerPattern = 16;
+
+    void prepare (double sampleRate) noexcept
+    {
+        gain.reset (sampleRate, 0.01);
+        gain.setCurrentAndTargetValue (1.0f - pendingOvertone);
+    }
+
+    void set (const ChopSettings& s) noexcept
+    {
+        pendingPattern  = s.pattern;
+        pendingComb     = juce::jlimit (1, 32, s.comb);
+        pendingOvertone = juce::jlimit (0.0f, 2.0f, s.overtone);
+        gain.setTargetValue (1.0f - pendingOvertone);
+    }
+
+    /** Call when a new cycle starts: the pattern and Comb take effect. */
+    void startCycle() noexcept
+    {
+        pattern = pendingPattern;
+        comb    = pendingComb;
+    }
+
+    /**
+        Applies CHOP to one band-limited sample x of a wave at phase t (0..1) with
+        phase step dt. edgeValue (segment) returns the wave's value at the start of
+        segment k (0 .. 16 x Comb), taking the midpoint where the wave itself jumps.
+    */
+    template <typename EdgeValue>
+    float apply (float x, float t, float dt, EdgeValue&& edgeValue) noexcept
+    {
+        if (! gain.isSmoothing() && gain.getTargetValue() == 1.0f)
+            return x;   // Overtone 0: no CHOP, bit for bit
+
+        const float chopGain = gain.getNextValue();
+        const int   segments = stepsPerPattern * comb;
+        const float position = t * (float) segments;
+        const int   segment  = juce::jmin ((int) position, segments - 1);
+        const float local    = position - (float) segment;
+        const float segDt    = dt * (float) segments;   // phase step within a segment
+
+        // Full CHOP while a segment lasts four samples or more, none below two.
+        const float depth = juce::jlimit (0.0f, 1.0f, (1.0f / juce::jmax (segDt, 1.0e-6f) - 2.0f) * 0.5f);
+        if (depth <= 0.0f)
+            return x;
+        const float chopped = 1.0f - depth * (1.0f - chopGain);
+
+        const auto gainOf = [&] (int k) noexcept
+        {
+            return ((pattern >> ((k + segments) % stepsPerPattern)) & 1u) != 0 ? chopped : 1.0f;
+        };
+
+        const float g = gainOf (segment);
+        float y = g * x;
+
+        if (local < 2.0f * segDt)   // just after this segment's first edge
+        {
+            const float before = gainOf (segment - 1);
+            if (before != g)
+                y -= (g - before) * edgeValue (segment) * Blep4::tail (local / segDt);
+        }
+        if (local > 1.0f - 2.0f * segDt)   // just before the next edge
+        {
+            const float after = gainOf (segment + 1);
+            if (after != g)
+                y += (after - g) * edgeValue (segment + 1) * Blep4::tail ((1.0f - local) / segDt);
+        }
+        return y;
+    }
+
+    int getSegments() const noexcept   { return stepsPerPattern * comb; }
+
+private:
+    juce::SmoothedValue<float> gain { 1.0f };   // 1 - Overtone
+    juce::uint16 pattern = 0xAAAA, pendingPattern = 0xAAAA;
+    int   comb = 1, pendingComb = 1;
+    float pendingOvertone = 0.0f;
+};
+
 class PolyBlepOscillator
 {
 public:
@@ -133,6 +240,9 @@ public:
 
     /** Takes effect at the next cycle boundary. */
     void setWaveform (int newWaveform) noexcept   { pendingWaveform = newWaveform; }
+
+    void prepare (double sampleRate) noexcept                { chop.prepare (sampleRate); }
+    void setChop (const ChopSettings& settings) noexcept     { chop.set (settings); }
 
     /** Sets the pitch immediately (no glide). Clamped below half the sample rate. */
     void setFrequency (float hz, double sampleRate) noexcept
@@ -172,6 +282,7 @@ public:
                 break;
         }
 
+        value = chop.apply (value, t, dt, [this] (int segment) noexcept { return valueAtSegment (segment); });
         const float out = waveform == sine ? treble.bypass (value) : treble.process (value);
 
         phase += dt;
@@ -179,12 +290,28 @@ public:
         {
             phase -= 1.0f;
             waveform = pendingWaveform;   // switch shapes only at the cycle boundary
+            chop.startCycle();
         }
         return out;
     }
 
 private:
+    /** The ideal wave at the start of CHOP segment k (the midpoint where the wave itself jumps). */
+    float valueAtSegment (int segment) const noexcept
+    {
+        const int segments = chop.getSegments();
+        const float p = (float) segment / (float) segments;
+        switch (waveform)
+        {
+            case square:   return (segment % segments == 0 || 2 * segment == segments) ? 0.0f : (p < 0.5f ? 1.0f : -1.0f);
+            case triangle: return p < 0.5f ? 4.0f * p - 1.0f : 3.0f - 4.0f * p;
+            case sawtooth: return segment % segments == 0 ? 0.0f : 2.0f * p - 1.0f;
+            default:       return std::sin (juce::MathConstants<float>::twoPi * p);
+        }
+    }
+
     Blep4::TrebleCompensation treble;
+    Chop chop;
     float phase = 0.0f, phaseInc = 0.0f;
     int   waveform = sine, pendingWaveform = sine;
 };
@@ -234,6 +361,9 @@ public:
         stepsSinceReroll = 0;
     }
 
+    void prepare (double sampleRate) noexcept                { chop.prepare (sampleRate); }
+    void setChop (const ChopSettings& settings) noexcept     { chop.set (settings); }
+
     /** Sets the pitch immediately (no glide). */
     void setFrequency (float hz, double sampleRate) noexcept
     {
@@ -260,9 +390,22 @@ public:
         if (local > 1.0f - 2.0f * dt)
             value += (levels[(size_t) ((step + 1) % numSteps)] - current) * Blep4::tail ((1.0f - local) / dt);
 
+        // CHOP: with Comb = 1 its edges are Random's own step edges, where the wave's value
+        // is the midpoint of the two levels; with a higher Comb the extra edges fall inside a step.
+        value = chop.apply (value, phase, phaseInc, [this] (int segment) noexcept
+        {
+            const int comb = chop.getSegments() / numSteps;
+            const int k = segment / comb;
+            const float level = levels[(size_t) (k % numSteps)];
+            return segment % comb == 0 ? 0.5f * (level + levels[(size_t) ((k + numSteps - 1) % numSteps)]) : level;
+        });
+
         phase += phaseInc;
         if (phase >= 1.0f)
+        {
             phase -= 1.0f;
+            chop.startCycle();
+        }
         return value;   // no treble compensation: at high notes Random's steps run far above Nyquist, and the boost would amplify them
     }
 
@@ -292,6 +435,7 @@ private:
     }
 
     std::array<float, numSteps> levels {};
+    Chop chop;
     juce::uint32 state = 0x9e3779b9u;
     float phase = 0.0f, phaseInc = 0.0f;
     int   lastStep = 0, stepsSinceReroll = 0;

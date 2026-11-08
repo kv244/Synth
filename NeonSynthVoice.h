@@ -55,6 +55,7 @@ public:
         const SampleData* sample = nullptr;       // this block's sample (SampleSlot::beginBlock)
         SampleReader::Settings sampleSettings;    // latched at each note-on
         GrainCloud::Settings grainSettings;       // live: applies to the next grains
+        ChopSettings chop;                        // Oscillator and Random; pattern and Comb take effect at a cycle boundary
     };
 
     /** What the editor's visualisers need to know about this voice. */
@@ -106,6 +107,8 @@ public:
         sampleRate = newSampleRate;
         adsr.setSampleRate (newSampleRate);
         adsr.reset();
+        oscillator.prepare (newSampleRate);        // CHOP's Overtone glide
+        randomOscillator.prepare (newSampleRate);
 
         filter.prepare ({ newSampleRate, (juce::uint32) maxBlockSize, 1 });
         cloudBuffer.assign ((size_t) juce::jmax (1, maxBlockSize), 0.0f);   // the granular source renders a block at a time
@@ -134,6 +137,8 @@ public:
             adsr.setParameters (adsrParams);
 
         oscillator.setWaveform (p.waveform);              // applied at the next cycle boundary
+        oscillator.setChop (p.chop);
+        randomOscillator.setChop (p.chop);
         cutoff.setTargetValue (clampCutoff (p.cutoffHz));
         filterMix.setTargetValue (p.filterOn ? 1.0f : 0.0f);
 

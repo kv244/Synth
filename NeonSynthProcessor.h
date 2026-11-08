@@ -159,6 +159,15 @@ public:
     auto withCurrentSample (Fn&& fn) const   { return sampleSlot.withCurrent (std::forward<Fn> (fn)); }
 
     //==========================================================================
+    // CHOP's pattern (v1.6.0): 16 steps, saved with the session, not host parameters.
+
+    /** Any thread except the audio thread. Sounding voices pick it up at their next cycle. */
+    void setChopStep (int step, bool chopped) noexcept;
+
+    /** Bit k set = step k (0..15) chopped. */
+    juce::uint16 getChopPattern() const noexcept   { return chopPattern.load(); }
+
+    //==========================================================================
     // Scope data: audio thread writes, editor timer (message thread) reads.
     static constexpr int scopeFifoSize = 1 << 15;   // ~0.7 s at 48 kHz
 
@@ -236,6 +245,11 @@ private:
     juce::AudioParameterFloat*  grDensityParameter     = nullptr;
     juce::AudioParameterFloat*  grSprayParameter       = nullptr;
     juce::AudioParameterFloat*  grJitterParameter      = nullptr;
+    juce::AudioParameterFloat*  chopOvertoneParameter  = nullptr;
+    juce::AudioParameterInt*    chopCombParameter      = nullptr;
+
+    /** CHOP's pattern, bit k = step k chopped. Written by the editor, read once per block; lock-free. */
+    std::atomic<juce::uint16> chopPattern { ChopSettings().pattern };
 
     juce::SmoothedValue<float> outputGain { 1.0f };
 
