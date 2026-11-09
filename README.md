@@ -65,17 +65,6 @@ Run `NeonSynth-x.y.z-Windows-Setup.exe`. The wizard installs the VST3 to
 
 ---
 
-## Releasing
-
-Releases are published only from a version tag; merging to `master` publishes nothing.
-
-1. Set the new version in `CMakeLists.txt` (both places) and `installer.nsi`, and merge it to `master`.
-2. Tag it: `git tag v1.6.0 && git push origin v1.6.0`.
-
-The Release workflow refuses a tag that doesn't match `CMakeLists.txt`, or one that already has a release, then runs every test and pluginval at strictness 10 before building the installer.
-
----
-
 ## Building
 
 ### Prerequisites
