@@ -17,6 +17,9 @@
                   so every voice runs its full 32 grains (the worst case)
       dense     - sequencer at 1/32 and 240 BPM plus an 8-note chord every 250 ms
 
+    It first times creating a processor (what a host does when it loads the plugin):
+    the first instance in the process, then the average of the next ten.
+
     Build with CMake:  cmake -B build -DJUCE_DIR=... -DNEONSYNTH_BUILD_TESTS=ON
                        cmake --build build --config Release --target RenderBenchmark
     Prints, per scenario, the render time and the share of one CPU core used
@@ -91,6 +94,18 @@ int main()
 {
     juce::ScopedJuceInitialiser_GUI juce;   // the processor's editor code needs the message manager
     const auto noChange = [] (juce::AudioProcessor&) {};
+
+    const auto millisecondsToCreate = []
+    {
+        const auto start = std::chrono::steady_clock::now();
+        { NeonSynthProcessor processor; }
+        return std::chrono::duration<double, std::milli> (std::chrono::steady_clock::now() - start).count();
+    };
+    const double firstInstance = millisecondsToCreate();
+    double laterInstances = 0.0;
+    for (int i = 0; i < 10; ++i)
+        laterInstances += millisecondsToCreate() / 10.0;
+    std::printf ("New instance: %.1f ms the first time in the process, %.1f ms after that\n\n", firstInstance, laterInstances);
 
     std::printf ("Render benchmark (48 kHz, %d-sample blocks)\n", benchBlockSize);
 
