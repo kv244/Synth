@@ -17,7 +17,6 @@ Needs: pip install markdown playwright && playwright install chromium
 """
 import argparse
 import datetime
-import html
 import json
 import os
 import pathlib
@@ -70,7 +69,12 @@ def github_slug(value, separator="-"):
 
 
 CSS = """
-@page { size: A4; margin: 25mm 25mm 22mm 25mm; }
+@page { size: A4; margin: 25mm 25mm 22mm 25mm;
+  @bottom-center { content: "NeonSynth User Manual – page " counter(page) " of " counter(pages);
+                   font-family: 'Liberation Sans', 'DejaVu Sans', sans-serif; font-size: 8pt; color: #444; } }
+@page cover { margin: 0; @bottom-center { content: none; } }
+.cover { page: cover; width: 210mm; height: 297mm; break-after: page; }
+.cover img { width: 210mm; height: 297mm; margin: 0; display: block; }
 html { font-family: 'Liberation Sans', 'DejaVu Sans', Arial, sans-serif; font-size: 10pt; line-height: 1.42; color: #111; }
 body { margin: 0; }
 h1 { font-size: 24pt; margin: 0 0 6mm; }
@@ -97,7 +101,9 @@ def to_html(md, version, sha):
     built = datetime.date.today().isoformat()
     md = md.rstrip() + (f"\n\n<p class=\"buildinfo\">PDF built {built} from NeonSynth v{version}"
                         f"{f', commit {sha}' if sha else ''}.</p>\n")
-    body = markdown.markdown(
+    cover = '<div class="cover"><img src="images/cover.svg" alt="NeonSynth User Manual cover"></div>\n' \
+        if (HERE / "images" / "cover.svg").exists() else ""
+    body = cover + markdown.markdown(
         md, extensions=["tables", "fenced_code", "toc", "sane_lists"],
         extension_configs={"toc": {"slugify": github_slug}})
     return (f"<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
@@ -115,13 +121,7 @@ def print_pdf(html_text, pdf_path):
             page.goto(page_html.as_uri())
             page.wait_for_load_state("networkidle")
             page.evaluate("Promise.all(Array.from(document.images).map(i => i.decode().catch(() => null)))")
-            page.pdf(path=str(pdf_path), prefer_css_page_size=True, print_background=True,
-                     display_header_footer=True,
-                     header_template="<span></span>",
-                     footer_template="<div style=\"font-size:8pt;width:100%;text-align:center;"
-                                     "font-family:sans-serif;color:#444\">NeonSynth User Manual &#8211; "
-                                     "page <span class=\"pageNumber\"></span> of "
-                                     "<span class=\"totalPages\"></span></div>")
+            page.pdf(path=str(pdf_path), prefer_css_page_size=True, print_background=True)
             browser.close()
     finally:
         page_html.unlink(missing_ok=True)

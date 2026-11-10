@@ -2,12 +2,15 @@ name: Release
 
 # Publishes a release only when a version tag is pushed:
 #
-#   1. Bump the version in CMakeLists.txt (both places) and installer.nsi, merge to master.
-#   2. git tag v1.4.0 && git push origin v1.4.0
+#   1. Bump the version in CMakeLists.txt (both places) and installer.nsi, update the
+#      user manual ("Applies to", edition) and redraw its cover
+#      (python docs/figures/cover.py --date "<release date>"), and merge to master.
+#   2. git tag vX.Y.Z && git push origin vX.Y.Z
 #
-# The job refuses to run if the tag doesn't match the CMakeLists.txt version or
-# if a release for the tag already exists, so a release is never overwritten.
-# Pushing to master no longer publishes anything.
+# The job refuses to run if the tag doesn't match the CMakeLists.txt version, if
+# the manual or its cover still names another version, or if a release for the tag
+# already exists, so a release is never overwritten. Pushing to master publishes
+# nothing. After the release is created, manual-pdf attaches the manual as a PDF.
 
 on:
   push:
@@ -79,7 +82,12 @@ jobs:
       - name: pluginval (strictness 10)
         shell: pwsh
         run: |
-          Invoke-WebRequest https://github.com/Tracktion/pluginval/releases/download/v1.0.4/pluginval_Windows.zip -OutFile pluginval.zip
+          # GitHub's download servers sometimes answer 5xx (PR #16 failed on a 504), so retry.
+          $url = 'https://github.com/Tracktion/pluginval/releases/download/v1.0.4/pluginval_Windows.zip'
+          foreach ($try in 1..4) {
+            try { Invoke-WebRequest $url -OutFile pluginval.zip; break }
+            catch { if ($try -eq 4) { throw }; Write-Host "pluginval download failed ($_), retrying"; Start-Sleep -Seconds (15 * $try) }
+          }
           Expand-Archive pluginval.zip -DestinationPath pluginval
           .\pluginval\pluginval.exe --strictness-level 10 --validate-in-process --skip-gui-tests `
               --validate build\NeonSynth_artefacts\Release\VST3\NeonSynth.vst3
@@ -115,6 +123,9 @@ jobs:
 
             Upgrading from BasicSynth (v1.3 and earlier)? The installer removes the old
             `BasicSynth.vst3`; projects saved with BasicSynth open with NeonSynth.
+
+            The user manual is attached as **NeonSynth-User-Manual-${{ steps.version.outputs.tag }}.pdf**
+            (also readable online in `docs/NeonSynth-User-Manual.md`).
 
             ### Requirements
             - Windows 10 / 11 (64-bit)

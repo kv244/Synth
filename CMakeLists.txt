@@ -98,10 +98,9 @@ target_include_directories(NeonSynth
 )
 
 # ---------------------------------------------------------------------------
-# Optional unit tests: the step sequencer engine (StepSequencer.h), the voice
-# envelope (VoiceEnvelope.h), the oscillator (Oscillator.h) and the sample
-# (SampleData.h, SampleSlot.h, SampleLoader.h). They only need JUCE's audio
-# modules, so they build in a few seconds once JUCE is compiled:
+# Optional unit tests, one executable per file in tests/ (listed in
+# NEONSYNTH_UNIT_TESTS below). They only need JUCE's audio modules, so they
+# build in a few seconds once JUCE is compiled:
 #   cmake -B build -DJUCE_DIR=... -DNEONSYNTH_BUILD_TESTS=ON
 #   cmake --build build --config Release --target unit_tests
 #   ctest --test-dir build -C Release --output-on-failure

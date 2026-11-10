@@ -67,7 +67,8 @@ def log_peaks(freq, db, lo=20.0, hi=24000.0, bands=1200):
     for a, b in zip(idx[:-1], idx[1:]):
         if b > a:
             k = a + int(np.argmax(db[a:b]))
-            f.append(freq[k]); d.append(db[k])
+            f.append(freq[k])
+            d.append(db[k])
     return np.array(f), np.array(d)
 
 
@@ -374,7 +375,8 @@ def fig06(vst, out):
     held, x0 = 0.62, 0.22
     for label, y in rows:
         ax.text(0.0, y, label, va="center", fontsize=9, fontweight="bold")
-    seg = lambda y, a, b, **k: ax.annotate("", xy=(b, y), xytext=(a, y), arrowprops=dict(arrowstyle="->", lw=1.1, **k))
+    def seg(y, a, b, **k):
+        ax.annotate("", xy=(b, y), xytext=(a, y), arrowprops=dict(arrowstyle="->", lw=1.1, **k))
     seg(2.3, x0, 0.97)
     ax.text(0.975, 2.3, "end", va="center", fontsize=8.5)
     for i in range(4):

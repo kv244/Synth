@@ -18,7 +18,6 @@ import argparse
 import pathlib
 import textwrap
 
-import matplotlib.patheffects as pe
 import numpy as np
 from PIL import Image
 

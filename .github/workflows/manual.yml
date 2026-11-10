@@ -1,19 +1,20 @@
 name: Manual
 
 # Checks the user manual against the source and prints it to PDF.
-#   * fails if "Applies to" does not name the version in CMakeLists.txt, or a link/image is broken
+#   * fails if "Applies to" or the cover does not name the version in CMakeLists.txt,
+#     or a link/image is broken
 #   * uploads the PDF as a build artifact (Actions run page, kept 30 days)
 # A tagged release also attaches the PDF to the release (see release.yml).
 
 on:
   push:
-    branches: [master, main]
+    branches: [master, main, oscillators]
     paths:
       - 'docs/**'
       - 'CMakeLists.txt'
       - '.github/workflows/manual.yml'
   pull_request:
-    branches: [master, main]
+    branches: [master, main, oscillators]
     paths:
       - 'docs/**'
       - 'CMakeLists.txt'

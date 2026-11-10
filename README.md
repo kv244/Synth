@@ -13,7 +13,7 @@ by **Razvan Julian Petrescu** / **AudioDSP**.
 waveform-listening exercises, the illustrated control guide and a tour of the
 C++ source. Learn the sound as a musician, or explore how it works as a coder.
 
-![Neon Synth screenshot](screenshot.png)
+![NeonSynth v1.6.0 with a sawtooth and the sequencer running](docs/images/captures/ui-oscillator-running.png)
 
 ## Features
 
@@ -461,11 +461,18 @@ audio_bright = plugin.process(msgs, 2.5, SR, reset=True)
 | `gui_background.png` | Neon grid background image (embedded as binary data) |
 | `icon.png` | Application / plugin icon |
 | `test_midi.py` | Automated Python test suite |
+| `log_to_midi.py` | Converts a captured `midi.log` into a Standard MIDI File |
+| `docs/NeonSynth-User-Manual.md` | The user manual |
+| `docs/build_manual.py` | Checks the manual against the release (version, cover, links) and prints it to PDF |
+| `docs/figures/` | Scripts that draw the manual's figures and cover, with a README on remaking them |
+| `docs/images/` | The manual's figures and cover (SVG and PNG), and the raw application captures |
+| `docs/requirements-manual.txt` | Pinned Python dependencies for the PDF build |
 | `pyproject.toml` | Ruff lint configuration |
 | `.github/workflows/test.yml` | CI on every PR — Windows build, unit tests, Python suite, pluginval (strictness 5), CPU benchmark |
 | `.github/workflows/build.yml` | CI — CMake build and unit tests on Ubuntu (GCC) |
-| `.github/workflows/lint.yml` | CI — Python ruff lint |
-| `.github/workflows/release.yml` | Release on a version tag — all tests, pluginval (strictness 10), installer, GitHub Release |
+| `.github/workflows/lint.yml` | CI — ruff lint of every Python file |
+| `.github/workflows/manual.yml` | CI — checks the manual against the version and builds its PDF |
+| `.github/workflows/release.yml` | Release on a version tag — manual check, all tests, pluginval (strictness 10), installer, GitHub Release with the manual PDF |
 | `requirements-test.txt` | Pinned Python dependencies for `test_midi.py` |
 | `installer.nsi` | NSIS installer script (VST3 + Standalone) |
 | `LICENSE` | GNU Affero General Public License v3 |
