@@ -1,0 +1,54 @@
+name: Manual
+
+# Checks the user manual against the source and prints it to PDF.
+#   * fails if "Applies to" does not name the version in CMakeLists.txt, or a link/image is broken
+#   * uploads the PDF as a build artifact (Actions run page, kept 30 days)
+# A tagged release also attaches the PDF to the release (see release.yml).
+
+on:
+  push:
+    branches: [master, main]
+    paths:
+      - 'docs/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/manual.yml'
+  pull_request:
+    branches: [master, main]
+    paths:
+      - 'docs/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/manual.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pdf:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262   # v4.4.0
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: '3.14'
+
+      - name: Check the manual against the source
+        run: python docs/build_manual.py --check
+
+      - name: Install the PDF tools
+        run: |
+          pip install -r docs/requirements-manual.txt
+          python -m playwright install --with-deps chromium
+
+      - name: Print the manual to PDF
+        run: python docs/build_manual.py --out build/manual
+
+      - name: Upload the PDF
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02   # v4.6.2
+        with:
+          name: NeonSynth-User-Manual
+          path: build/manual/*.pdf
+          retention-days: 30

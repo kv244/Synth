@@ -43,6 +43,9 @@ jobs:
           fi
           echo "tag=${TAG_VERSION}" >> "$GITHUB_OUTPUT"
 
+      - name: Check the manual matches this release
+        run: python docs/build_manual.py --check
+
       - name: Cache JUCE
         id: cache-juce
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830        # v4.3.0
@@ -120,3 +123,29 @@ jobs:
             ### What's new
           files: NeonSynth-${{ steps.version.outputs.tag }}-Windows-Setup.exe
           generate_release_notes: true
+
+  # Prints the user manual to PDF and attaches it to the release created above.
+  manual-pdf:
+    needs: build-installer
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262   # v4.4.0
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: '3.14'
+
+      - name: Install the PDF tools
+        run: |
+          pip install -r docs/requirements-manual.txt
+          python -m playwright install --with-deps chromium
+
+      - name: Print the manual to PDF
+        run: python docs/build_manual.py --out build/manual
+
+      - name: Attach the PDF to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" build/manual/*.pdf --clobber
