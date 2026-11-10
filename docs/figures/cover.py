@@ -2,7 +2,13 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Draws the manual's cover: docs/images/cover.svg and cover.png (A4 at 300 dpi).
 
-    python docs/figures/cover.py [--out docs/images]
+    python docs/figures/cover.py --date "10 November 2026" [--out docs/images]
+
+The cover carries the version (read from CMakeLists.txt) and the release date
+(--date; without it, the date already recorded for this version is kept). Both
+are written to cover.json, and docs/build_manual.py --check fails when that
+version is not the one in CMakeLists.txt, so REDRAW THE COVER ON EVERY VERSION
+BUMP, with the new release date.
 
 The picture is the instrument's idea in one image: a stack of single-cycle
 waves that morphs from sine through triangle and square to sawtooth, over a
@@ -10,7 +16,10 @@ receding grid, with the 16-step row underneath. Everything is drawn by this
 script (no stock art); the glow is layered strokes, so the SVG has no filters.
 """
 import argparse
+import json
 import pathlib
+import re
+import sys
 
 import matplotlib
 matplotlib.use("Agg")
@@ -53,7 +62,7 @@ def spaced(text):
     return " ".join(text)          # thin spaces: wide, technical letter-spacing
 
 
-def draw(out_dir):
+def draw(out_dir, version, date):
     fig = plt.figure(figsize=(W_MM / 25.4, H_MM / 25.4))
     ax = fig.add_axes([0, 0, 1, 1])
     ax.set_xlim(0, W_MM)
@@ -121,6 +130,8 @@ def draw(out_dir):
                                     facecolor=AMBER if on else "none", alpha=0.95 if on else 0.8, zorder=45))
     ax.text(cx, 19, spaced("RAZVAN JULIAN PETRESCU") + "   /   " + spaced("AUDIODSP"), color="#cfd8e6",
             fontsize=8, ha="center", va="center", zorder=50)
+    ax.text(cx, 11.5, spaced(f"VERSION {version}") + "   \u00b7   " + spaced(date.upper()), color=CYAN,
+            fontsize=8, ha="center", va="center", zorder=50)
 
     out_dir.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_dir / "cover.svg", metadata={"Date": None, "Creator": None})
@@ -129,7 +140,20 @@ def draw(out_dir):
 
 
 if __name__ == "__main__":
+    here = pathlib.Path(__file__).resolve().parent
     ap = argparse.ArgumentParser()
-    ap.add_argument("--out", type=pathlib.Path, default=pathlib.Path(__file__).resolve().parent.parent / "images")
-    draw(ap.parse_args().out)
-    print("wrote cover.svg and cover.png")
+    ap.add_argument("--out", type=pathlib.Path, default=here.parent / "images")
+    ap.add_argument("--date", help='release date as printed, e.g. "10 November 2026"')
+    a = ap.parse_args()
+    cmake = (here.parent.parent / "CMakeLists.txt").read_text(encoding="utf-8")
+    version = re.search(r"project\(NeonSynth VERSION\s+(\d+\.\d+\.\d+)", cmake).group(1)
+    info = a.out / "cover.json"
+    date = a.date
+    if not date and info.exists():
+        old = json.loads(info.read_text(encoding="utf-8"))
+        date = old["release_date"] if old.get("version") == version else None
+    if not date:
+        sys.exit(f"cover: give the release date of v{version} with --date")
+    draw(a.out, version, date)
+    info.write_text(json.dumps({"version": version, "release_date": date}, indent=2) + "\n", encoding="utf-8")
+    print(f"wrote cover.svg, cover.png and cover.json (v{version}, {date})")

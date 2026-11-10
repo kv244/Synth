@@ -7,7 +7,8 @@
 
 The check fails (exit 1) when the manual does not match the code it ships with:
   * "Applies to" and the source tag must name the version in CMakeLists.txt;
-  * every relative link and image must point at a file that exists.
+  * every relative link and image must point at a file that exists;
+  * the cover (docs/images/cover.json) must have been redrawn for that version.
 The manual in the repository is never changed. The PDF is built from a copy that
 gets a line stating the version, the commit and the build date (the edition
 number and date at the top of the manual are still written by hand).
@@ -17,6 +18,7 @@ Needs: pip install markdown playwright && playwright install chromium
 import argparse
 import datetime
 import html
+import json
 import os
 import pathlib
 import re
@@ -51,6 +53,12 @@ def check(md, version):
         target = link.split("#")[0]
         if target and not (MANUAL.parent / target).exists():
             problems.append(f"broken relative link: {link}")
+    cover = HERE / "images" / "cover.json"
+    if cover.exists():
+        drawn = json.loads(cover.read_text(encoding="utf-8")).get("version")
+        if drawn != version:
+            problems.append(f"the cover says v{drawn} but CMakeLists.txt says v{version}: run "
+                            f"docs/figures/cover.py --date \"<release date>\"")
     return problems
 
 
