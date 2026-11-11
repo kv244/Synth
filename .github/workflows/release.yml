@@ -151,13 +151,12 @@ jobs:
       - name: Install the PDF tools
         run: |
           pip install -r docs/requirements-manual.txt
-          # The runner sometimes can't resolve Ubuntu's package servers for a few minutes
-          # (PR #20 failed twice on that), so retry the browser and its system packages.
-          for try in 1 2 3 4; do
-            python -m playwright install --with-deps chromium && break
-            [ "$try" = 4 ] && exit 1
-            echo "Browser install failed, retrying in $((60 * try)) s"; sleep $((60 * try))
-          done
+          # --with-deps installs Chromium's libraries and fonts through apt. When the runner can't
+          # reach Ubuntu's package servers (PR #20 hit that three times in an hour), install the
+          # browser alone: the runner image already carries Chrome's libraries.
+          timeout 300 python -m playwright install --with-deps chromium || python -m playwright install chromium
+          fc-list | grep -qiE 'liberation sans|dejavu sans' \
+            || echo '::warning::Neither Liberation Sans nor DejaVu Sans is installed; the PDF falls back to another font'
 
       - name: Print the manual to PDF
         run: python docs/build_manual.py --out build/manual
