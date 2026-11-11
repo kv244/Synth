@@ -130,16 +130,21 @@ if(NEONSYNTH_BUILD_TESTS)
     endforeach()
 
     # Programs that drive the whole processor directly (no host, no Python):
-    #   RenderBenchmark      times processBlock for a few load scenarios
-    #   RealtimeSafetyTests  fails if processBlock allocates (also run by ctest)
-    foreach(program RenderBenchmark RealtimeSafetyTests)
+    #   RenderBenchmark       times processBlock for a few load scenarios
+    #   RealtimeSafetyTests   fails if processBlock allocates (also run by ctest)
+    #   ParameterLayoutTests  fails if a parameter changed other than by being appended (ctest)
+    #   EditorTests           drives the editor offscreen with mouse events and paints it (ctest;
+    #                         on Linux it needs an X display, e.g. xvfb-run)
+    foreach(program RenderBenchmark RealtimeSafetyTests ParameterLayoutTests EditorTests)
         juce_add_console_app(${program} PRODUCT_NAME "${program}")
         juce_generate_juce_header(${program})
         target_sources(${program} PRIVATE tests/${program}.cpp NeonSynthProcessor.cpp)
         target_include_directories(${program} PRIVATE ${CMAKE_CURRENT_LIST_DIR})
         target_compile_definitions(${program} PRIVATE
             JUCE_WEB_BROWSER=0
-            JUCE_USE_CURL=0)
+            JUCE_USE_CURL=0
+            JUCE_MODAL_LOOPS_PERMITTED=1                          # EditorTests runs the message loop
+            NEONSYNTH_TESTS_DIR="${CMAKE_CURRENT_LIST_DIR}/tests")   # ParameterLayoutTests' reference
         target_link_libraries(${program} PRIVATE
             NeonSynthResources
             juce::juce_audio_utils
@@ -150,6 +155,8 @@ if(NEONSYNTH_BUILD_TESTS)
             juce::juce_recommended_warning_flags)
     endforeach()
 
-    add_dependencies(unit_tests RealtimeSafetyTests)
-    add_test(NAME RealtimeSafetyTests COMMAND RealtimeSafetyTests)
+    foreach(program RealtimeSafetyTests ParameterLayoutTests EditorTests)
+        add_dependencies(unit_tests ${program})
+        add_test(NAME ${program} COMMAND ${program})
+    endforeach()
 endif()

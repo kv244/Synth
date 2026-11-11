@@ -204,6 +204,8 @@ ctest --test-dir build -C Release --output-on-failure
 | `SampleReaderTests` | Sample playback: pitch tracking (and across sample rates), which band-limited copy each pitch reads, no aliasing at +24 semitones, steady level through crossfaded loops, smooth off-cycle loops, One-shot ends, Loop until release, start offset, the sample reference count (23 checks) |
 | `GranularTests` | The granular source: bit-identical renders from the same seed, grain counts at 5 / 50 / 200 per second, steady level across size and density, pitch, the 32-grain cap, scan speed and freeze, retrigger without cutting grains, stopping, the sample reference |
 | `RealtimeSafetyTests` | Hooks `operator new`/`delete` and fails if `processBlock` allocates or frees while rendering chords, the sequencer, every waveform and every source as another thread keeps replacing the sample |
+| `ParameterLayoutTests` | Every parameter's ID, place, type, range, skew, default and choices against `tests/parameter-layout.txt`: parameters may only be appended (hosts store sessions by ID and normalised value). After appending one, update the reference with `ParameterLayoutTests --write` |
+| `EditorTests` | Opens the editor offscreen and drives it with mouse events: every parameter has a control, each source shows its own controls with nothing overlapping, knobs, boxes and buttons write their parameter in one gesture and follow it, the step grid, the CHOP strip, the sample markers, the view and help buttons; then paints every view at 75%, 100% and 150% for every source. Finds controls only by component ID, so it carries over to a new layout. On Linux it needs an X display (`xvfb-run`) |
 | `RenderBenchmark` | Times `processBlock` directly (no host) for idle, one note, 16 voices, 16 voices on each of the Sample, Random and Granular sources, 16 sculpted voices (CHOP, Noise and Fold all on), and a dense sequencer + chords load |
 
 ### Performance
@@ -277,6 +279,18 @@ Parameters: ['source', 'waveform', 'cutoff', 'filter_enabled', 'attack', … ]
   PASS  Log per instance        two instances wrote midi-2.log and midi-4.log
 
 24/24 passed
+```
+
+### Old sessions still sound the same
+
+`tests/compare_versions.py` renders 16 sessions (every source, CHOP, Noise and
+Fold, the sequencer, the clipper) through two builds and requires the audio to
+be identical sample for sample. New parameters start at neutral defaults, so a
+session saved with an earlier release must not change. CI builds the v1.6.0
+release once from its tag, caches it, and compares every pull request with it.
+
+```bash
+python tests/compare_versions.py old/NeonSynth.vst3 build/NeonSynth_artefacts/Release/VST3/NeonSynth.vst3
 ```
 
 ### Render and hear audio
@@ -456,6 +470,9 @@ audio_bright = plugin.process(msgs, 2.5, SR, reset=True)
 | `tests/GranularTests.cpp` | Unit tests for the granular source |
 | `tests/RealtimeSafetyTests.cpp` | Fails if `processBlock` allocates |
 | `tests/RenderBenchmark.cpp` | CPU benchmark of `processBlock` |
+| `tests/ParameterLayoutTests.cpp`, `tests/parameter-layout.txt` | The parameter-layout test and its reference |
+| `tests/EditorTests.cpp` | Offscreen editor tests (gestures and painting) |
+| `tests/compare_versions.py` | Renders a set of sessions through two VST3 builds and requires identical audio (CI compares against the v1.6.0 release) |
 | `Visualisers.h` | Oscilloscope, spectrum analyser, ADSR graph, voice lights and L/R meter (message thread only) |
 | `CMakeLists.txt` | Build config — Standalone + VST3, JUCE path, binary resources |
 | `gui_background.png` | Neon grid background image (embedded as binary data) |

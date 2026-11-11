@@ -6,9 +6,9 @@ name: Test
 
 on:
   pull_request:
-    branches: [master, main, oscillators]
+    branches: [master, main, 'v[0-9]*']
   push:
-    branches: [master, main, oscillators]
+    branches: [master, main, 'v[0-9]*']
 
 permissions:
   contents: read
@@ -50,6 +50,40 @@ jobs:
 
       - name: Python test suite (VST3)
         run: python test_midi.py
+
+      # Sessions saved with the reference release must render bit-identically (every new
+      # parameter defaults to neutral). The reference is built once from its tag and cached;
+      # the runner image is in the key, since a new compiler could round differently.
+      - name: Reference release
+        id: reference
+        shell: pwsh
+        run: |
+          "version=v1.6.0" >> $env:GITHUB_OUTPUT
+          "image=$env:ImageOS-$env:ImageVersion" >> $env:GITHUB_OUTPUT
+
+      - name: Cache the reference VST3
+        id: cache-reference
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830        # v4.3.0
+        with:
+          path: reference
+          key: neonsynth-${{ steps.reference.outputs.version }}-vst3-${{ steps.reference.outputs.image }}-juce-9.0.0
+
+      - name: Build the reference VST3
+        if: steps.cache-reference.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $tag = '${{ steps.reference.outputs.version }}'
+          git fetch --depth=1 origin "refs/tags/${tag}:refs/tags/${tag}"
+          git worktree add ..\reference-src $tag
+          cmake -S ..\reference-src -B ..\reference-build -DJUCE_DIR="C:/JUCE"
+          cmake --build ..\reference-build --config Release --parallel --target NeonSynth_VST3
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          New-Item -ItemType Directory reference | Out-Null
+          Copy-Item -Recurse -Path ..\reference-build\NeonSynth_artefacts\Release\VST3\NeonSynth.vst3 -Destination reference\NeonSynth.vst3
+          Get-ChildItem -Recurse reference | Select-Object -ExpandProperty FullName
+
+      - name: Sessions from the reference release render identically
+        run: python tests/compare_versions.py reference/NeonSynth.vst3 build/NeonSynth_artefacts/Release/VST3/NeonSynth.vst3
 
       - name: pluginval
         shell: pwsh
