@@ -151,7 +151,13 @@ jobs:
       - name: Install the PDF tools
         run: |
           pip install -r docs/requirements-manual.txt
-          python -m playwright install --with-deps chromium
+          # The runner sometimes can't resolve Ubuntu's package servers for a few minutes
+          # (PR #20 failed twice on that), so retry the browser and its system packages.
+          for try in 1 2 3 4; do
+            python -m playwright install --with-deps chromium && break
+            [ "$try" = 4 ] && exit 1
+            echo "Browser install failed, retrying in $((60 * try)) s"; sleep $((60 * try))
+          done
 
       - name: Print the manual to PDF
         run: python docs/build_manual.py --out build/manual
