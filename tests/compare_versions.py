@@ -113,12 +113,13 @@ def main() -> int:
         for i, vst in enumerate((old_vst, new_vst)):
             out = str(Path(tmp) / f"render{i}.npz")
             subprocess.run([sys.executable, __file__, "render", vst, out], check=True)
-            outs.append(np.load(out))
+            with np.load(out) as data:   # closed again, or Windows can't delete the folder
+                outs.append({key: data[key] for key in data.files})
         old, new = outs
 
         failed = []
         for name in SESSIONS:
-            if name not in old.files or name not in new.files:
+            if name not in old or name not in new:
                 print(f"  SKIP  {name} (a parameter it sets is missing from one build)")
                 continue
             a, b = old[name], new[name]
