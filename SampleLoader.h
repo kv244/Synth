@@ -128,25 +128,68 @@ namespace SampleLoader
     constexpr double defaultSampleSeconds = 4.0;
     constexpr int    defaultRootNote      = 60;   // C4
 
-    inline std::unique_ptr<SampleData> makeDefaultSample()
+    /**
+        The oscillator the pad is rendered with: a frozen copy of PolyBlepOscillator as
+        it was in v1.5.0 (sine and a 2-point PolyBLEP sawtooth). The pad must stay the
+        same sound in every version, because sessions that use it don't store it (they
+        save default="1"), so it can't follow improvements to the live oscillator.
+    */
+    struct PadOscillator
+    {
+        enum Waveform { sine = 0, sawtooth = 3 };
+
+        void setWaveform (int w) noexcept                          { pendingWaveform = w; }
+        void setFrequency (float hz, double sampleRate) noexcept   { phaseInc = (float) (hz / sampleRate); }
+        int  getWaveform() const noexcept                          { return waveform; }
+
+        float nextSample() noexcept
+        {
+            const float t = phase, dt = phaseInc;
+            float value;
+            if (waveform == sawtooth)
+            {
+                float blep = 0.0f;
+                if (t < dt)             { const float u = t / dt;          blep = u + u - u * u - 1.0f; }
+                else if (t > 1.0f - dt) { const float u = (t - 1.0f) / dt; blep = u * u + u + u + 1.0f; }
+                value = 2.0f * t - 1.0f - blep;
+            }
+            else
+            {
+                value = std::sin (juce::MathConstants<float>::twoPi * t);
+            }
+            phase += dt;
+            if (phase >= 1.0f)
+            {
+                phase -= 1.0f;
+                waveform = pendingWaveform;
+            }
+            return value;
+        }
+
+        float phase = 0.0f, phaseInc = 0.0f;
+        int   waveform = sine, pendingWaveform = sine;
+    };
+
+    /** Renders and prepares the built-in pad from scratch (about 16 ms); see makeDefaultSample(). */
+    inline std::unique_ptr<SampleData> renderDefaultSample()
     {
         const int length = (int) (defaultSampleSeconds * defaultSampleRate);
         const auto root = (float) juce::MidiMessage::getMidiNoteInHertz (defaultRootNote);
 
-        std::array<PolyBlepOscillator, 4> oscillators;
+        std::array<PadOscillator, 4> oscillators;
         const float detuneCents[] = { -7.0f, 0.0f, 7.0f };
         for (size_t i = 0; i < 3; ++i)
         {
-            oscillators[i].setWaveform (PolyBlepOscillator::sawtooth);
+            oscillators[i].setWaveform (PadOscillator::sawtooth);
             oscillators[i].setFrequency (root * std::pow (2.0f, detuneCents[i] / 1200.0f), defaultSampleRate);
         }
-        oscillators[3].setWaveform (PolyBlepOscillator::sine);
+        oscillators[3].setWaveform (PadOscillator::sine);
         oscillators[3].setFrequency (root * 0.5f, defaultSampleRate);
 
         // Waveform changes wait for a cycle boundary: run each oscillator into its shape,
         // staggered so the three saws don't start in phase.
         for (size_t i = 0; i < oscillators.size(); ++i)
-            for (int s = 0, n = 200 + 61 * (int) i; s < n || oscillators[i].getWaveform() != (i < 3 ? PolyBlepOscillator::sawtooth : PolyBlepOscillator::sine); ++s)
+            for (int s = 0, n = 200 + 61 * (int) i; s < n || oscillators[i].getWaveform() != (i < 3 ? PadOscillator::sawtooth : PadOscillator::sine); ++s)
                 oscillators[i].nextSample();
 
         // Two-pole low-pass (state-variable, cutoff 1.8 kHz, Q 0.7).
@@ -183,5 +226,19 @@ namespace SampleLoader
         auto sample = SampleData::create (buffer, defaultSampleRate, { "Default pad", {}, true }, error);
         jassert (sample != nullptr);
         return sample;
+    }
+
+    /**
+        The built-in pad, as a sample of its own. Rendering and preparing it (the oscillators,
+        normalising, rounding to 24 bits, the two half-rate copies and the hash) was nearly all
+        of the time it took to create a NeonSynth instance (about 16 of 20 ms in RenderBenchmark
+        on Linux, every time). It is the same every time, so it is prepared once per process (on
+        first use; C++ makes the first use thread-safe) and every caller gets a copy, which is
+        identical down to the hash.
+    */
+    inline std::unique_ptr<SampleData> makeDefaultSample()
+    {
+        static const std::unique_ptr<SampleData> prepared = renderDefaultSample();
+        return prepared->copy();
     }
 }

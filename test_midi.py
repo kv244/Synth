@@ -481,7 +481,7 @@ def sequencer_onsets(plugin) -> int:
 def test_state_round_trip(plugin):
     """The pattern is saved in the state and restored; a state without one loads the default."""
     xml = state_xml(plugin)
-    assert 'stateVersion="3"' in xml, "state has no stateVersion attribute (or not version 3)"
+    assert 'stateVersion="4"' in xml, "state has no stateVersion attribute (or not version 4)"
     assert "<Pattern>" in xml, "state has no pattern"
 
     # Only step 0 on: one note per pass through the pattern
@@ -573,7 +573,7 @@ def test_sample_state(plugin):
         still_plays = rms(render(plugin, [60], note_dur_s=0.3))
         assert still_plays > 1e-3, "plugin went silent after a missing sample"
 
-    v14 = with_sample_element(original, None).replace('stateVersion="3"', 'stateVersion="2"')
+    v14 = with_sample_element(original, None).replace('stateVersion="4"', 'stateVersion="2"')
     load_state_xml(plugin, v14)
     old = sample_attributes(state_xml(plugin))
     load_state_xml(plugin, original)
@@ -659,6 +659,103 @@ def test_random(plugin):
         for name, value in saved.items():
             plugin.parameters[name].raw_value = value
     return f"RMS {level:.3f}  correlation {on_period:.2f} at one period, {off_period:.2f} off it  repeat renders identical"
+
+
+CHOP_ELEMENT = re.compile(r"<Chop\b[^>]*/>")
+
+
+def test_chop_state(plugin):
+    """CHOP's pattern is saved and restored; a state from before v1.6.0 gets the default pattern.
+
+    A held sawtooth with Overtone at 100% is rendered with three patterns: none
+    chopped, the default (every second step chopped) and all chopped. Its level
+    must fall from the first to the second and to silence with the third."""
+    saved = {name: p.raw_value for name, p in plugin.parameters.items()}
+    xml = state_xml(plugin)
+    try:
+        match = CHOP_ELEMENT.search(xml)
+        assert match, "state has no <Chop> element"
+        assert 'pattern="0101010101010101"' in match.group(0), f"default pattern not saved: {match.group(0)}"
+
+        def level(pattern_xml: str) -> float:
+            load_state_xml(plugin, pattern_xml)
+            set_params(plugin, filter_on=False)
+            plugin.parameters["source"].raw_value = 0.0                  # Oscillator
+            plugin.parameters["waveform"].raw_value = 1.0                # Sawtooth
+            plugin.chop_overtone = 100.0
+            plugin.chop_comb = 1
+            audio = plugin.process([mido.Message("note_on", note=57, velocity=100, time=0.0)], 1.0, SAMPLE_RATE, reset=True)
+            return rms(audio[:, int(0.3 * SAMPLE_RATE):])
+
+        def with_pattern(pattern: str) -> str:
+            return CHOP_ELEMENT.sub(f'<Chop pattern="{pattern}"/>', xml, count=1)
+
+        open_level = level(with_pattern("0" * 16))
+        default_level = level(with_pattern("01" * 8))
+        closed_level = level(with_pattern("1" * 16))
+        v15 = CHOP_ELEMENT.sub("", xml, count=1).replace('stateVersion="4"', 'stateVersion="3"')
+        old_level = level(v15)
+
+        assert open_level > 1e-2, f"unchopped saw is silent (RMS {open_level:.4f})"
+        assert 0.55 < default_level / open_level < 0.85, \
+            f"every second step chopped should keep about 71% of the level, got {default_level / open_level:.2f}"
+        assert closed_level < 1e-3, f"every step chopped at 100% should be silent, RMS {closed_level:.5f}"
+        assert abs(old_level - default_level) < 1e-6, \
+            f"a v1.5 state should load the default pattern: RMS {old_level:.4f} vs {default_level:.4f}"
+        reloaded = CHOP_ELEMENT.search(state_xml(plugin)).group(0)
+        assert 'pattern="0101010101010101"' in reloaded, f"pattern not restored after a v1.5 state: {reloaded}"
+    finally:
+        load_state_xml(plugin, xml)
+        for name, value in saved.items():
+            plugin.parameters[name].raw_value = value
+    return (f"open {open_level:.3f}  default {default_level:.3f} ({100 * default_level / open_level:.0f}%)  "
+            f"all chopped {closed_level:.5f}  v1.5 state -> default")
+
+
+def test_sculpt(plugin):
+    """A chopped, noisy, folded sawtooth keeps its pitch and gains upper harmonics.
+
+    C4 on a sawtooth is rendered plain and with CHOP (Overtone 100%, Comb 2),
+    Fold (Drive 4, Mix 100%) and a little Noise (10%). The FFT peak below 1 kHz
+    must stay on a harmonic of C4, and the sculpted version must carry more of
+    its energy above 2 kHz than the plain one."""
+    saved = {name: p.raw_value for name, p in plugin.parameters.items()}
+    try:
+        def render(sculpted: bool) -> np.ndarray:
+            set_params(plugin, filter_on=False)
+            plugin.parameters["source"].raw_value = 0.0                  # Oscillator
+            plugin.parameters["waveform"].raw_value = 1.0                # Sawtooth
+            plugin.chop_overtone = 100.0 if sculpted else 0.0
+            plugin.chop_comb = 2
+            plugin.noise = 10.0 if sculpted else 0.0
+            plugin.fold_drive = 4.0
+            plugin.fold_mix = 100.0 if sculpted else 0.0
+            audio = plugin.process([mido.Message("note_on", note=60, velocity=100, time=0.0)], 1.5, SAMPLE_RATE, reset=True)
+            return audio[0, int(0.3 * SAMPLE_RATE):].astype(np.float64)
+
+        plain, sculpted = render(False), render(True)
+
+        def spectrum(x):
+            return np.abs(np.fft.rfft(x * np.hanning(len(x)))) ** 2, np.fft.rfftfreq(len(x), 1 / SAMPLE_RATE)
+
+        power, freqs = spectrum(sculpted)
+        low = (freqs > 100) & (freqs < 1000)
+        peak = freqs[low][np.argmax(power[low])]
+        harmonic = peak / 261.6256
+        assert abs(harmonic - round(harmonic)) < 0.02, f"strongest low partial {peak:.1f} Hz is not a harmonic of C4"
+
+        def upper_share(x):
+            p, f = spectrum(x)
+            return p[f > 2000].sum() / p.sum()
+        plain_share, sculpted_share = upper_share(plain), upper_share(sculpted)
+        assert sculpted_share > 1.5 * plain_share, \
+            f"sculpting should add upper harmonics: {100 * sculpted_share:.1f}% above 2 kHz vs {100 * plain_share:.1f}% plain"
+        assert np.all(np.isfinite(sculpted)) and np.max(np.abs(sculpted)) < 1.0, "sculpted output is not finite or not below full scale"
+    finally:
+        for name, value in saved.items():
+            plugin.parameters[name].raw_value = value
+    return (f"peak {peak:.1f} Hz (harmonic {round(harmonic)} of C4)  above 2 kHz: "
+            f"{100 * sculpted_share:.1f}% sculpted vs {100 * plain_share:.1f}% plain")
 
 
 def test_granular(plugin):
@@ -821,6 +918,8 @@ TESTS = [
     ("Sample pitch",      test_sample_pitch),
     ("Granular",          test_granular),
     ("Random",            test_random),
+    ("Chop state",        test_chop_state),
+    ("Sculpt",            test_sculpt),
     ("Channel 16 key",    test_keyboard_on_sequencer_channel),
     ("Log per instance",  test_midi_log_per_instance),
 ]

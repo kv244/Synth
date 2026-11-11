@@ -172,6 +172,7 @@ int main()
                 case 1:  processor.useDefaultSample(); break;
                 default: processor.setStateInformation (stateWithSample.getData(), (int) stateWithSample.getSize()); break;
             }
+            processor.setChopStep (swaps.load() % 16, (swaps.load() / 16) % 2 == 0);   // the editor toggling CHOP steps
             ++swaps;
         }
     });
@@ -196,6 +197,10 @@ int main()
             setParameter (processor, "source", (float) ((b / 300) % 4));     // Oscillator, Sample, Granular, Random
         if (b % 450 == 0)
             setParameter (processor, "smpLoop", (float) ((b / 450) % 3));    // One-shot, Loop, Loop until release
+        if (b % 70 == 0)
+            setParameter (processor, "chopOvertone", (float) ((b / 70) % 5) * 50.0f);   // 0, 50, 100, 150, 200 %
+        if (b % 110 == 0)
+            setParameter (processor, "chopComb", (float) (1 + (b / 110) % 32));
 
         inAudioCallback = true;
         processor.processBlock (buffer, midi);

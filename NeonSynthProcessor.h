@@ -86,8 +86,14 @@ public:
         std::atomic<float> secondsSinceOff { -1.0f };
         std::atomic<float> samplePosition { -1.0f };   // 0..1 while playing the sample, else -1
         std::array<std::atomic<float>, NeonSynthVoice::Telemetry::maxShownGrains> grainPositions;   // 0..1 per sounding grain, else -1
+        std::atomic<bool>  playingRandom { false };
+        std::array<std::atomic<float>, RandomStepOscillator::numSteps> randomLevels;   // valid while playingRandom
 
-        VoiceView() { for (auto& g : grainPositions) g.store (-1.0f); }
+        VoiceView()
+        {
+            for (auto& g : grainPositions) g.store (-1.0f);
+            for (auto& l : randomLevels)   l.store (0.0f);
+        }
     };
 
     const std::array<VoiceView, numVoices>& getVoiceViews() const noexcept { return voiceViews; }
@@ -157,6 +163,15 @@ public:
     /** Calls `fn (const SampleData*)` with the current sample, safely against a concurrent load. Not for the audio thread. */
     template <typename Fn>
     auto withCurrentSample (Fn&& fn) const   { return sampleSlot.withCurrent (std::forward<Fn> (fn)); }
+
+    //==========================================================================
+    // CHOP's pattern (v1.6.0): 16 steps, saved with the session, not host parameters.
+
+    /** Any thread except the audio thread. Sounding voices pick it up at their next cycle. */
+    void setChopStep (int step, bool chopped) noexcept;
+
+    /** Bit k set = step k (0..15) chopped. */
+    juce::uint16 getChopPattern() const noexcept   { return chopPattern.load(); }
 
     //==========================================================================
     // Scope data: audio thread writes, editor timer (message thread) reads.
@@ -236,6 +251,14 @@ private:
     juce::AudioParameterFloat*  grDensityParameter     = nullptr;
     juce::AudioParameterFloat*  grSprayParameter       = nullptr;
     juce::AudioParameterFloat*  grJitterParameter      = nullptr;
+    juce::AudioParameterFloat*  chopOvertoneParameter  = nullptr;
+    juce::AudioParameterInt*    chopCombParameter      = nullptr;
+    juce::AudioParameterFloat*  noiseLevelParameter    = nullptr;
+    juce::AudioParameterFloat*  foldDriveParameter     = nullptr;
+    juce::AudioParameterFloat*  foldMixParameter       = nullptr;
+
+    /** CHOP's pattern, bit k = step k chopped. Written by the editor, read once per block; lock-free. */
+    std::atomic<juce::uint16> chopPattern { ChopSettings().pattern };
 
     juce::SmoothedValue<float> outputGain { 1.0f };
 

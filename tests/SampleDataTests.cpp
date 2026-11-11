@@ -196,6 +196,39 @@ int main()
         auto b = SampleLoader::makeDefaultSample();
         check (a != nullptr && a->getOrigin().isDefault && a->getEmbeddedFlac().getSize() == 0, "the pad is marked as the default and is never embedded");
         check (a->getHash() == b->getHash(), "the pad is identical every time it is made");
+
+        // makeDefaultSample() hands out copies of one pad prepared once; each copy must be a
+        // separate sample, equal to a freshly rendered one in every sample of every level.
+        auto fresh = SampleLoader::renderDefaultSample();
+        bool same = fresh->getHash() == a->getHash() && fresh->getOrigin().isDefault == a->getOrigin().isDefault
+                 && fresh->getOrigin().name == a->getOrigin().name && fresh->getSampleRate() == a->getSampleRate();
+        for (int level = 0; level < SampleData::numLevels && same; ++level)
+        {
+            same = fresh->getLength (level) == a->getLength (level);
+            for (int i = -SampleData::padding; same && i < a->getLength (level) + SampleData::padding; ++i)
+                same = fresh->getData (level)[i] == a->getData (level)[i];
+        }
+        check (same, "a copy of the prepared pad equals a freshly rendered one, sample for sample");
+        a->users.fetch_add (1);
+        check (a.get() != b.get() && a->getData() != b->getData() && b->users.load() == 0,
+               "each copy is a separate sample with its own users count");
+        a->users.fetch_sub (1);
+
+        // Sessions that use the pad don't store it (they save default="1"), so it must stay the
+        // same sound in every version. SampleLoader renders it with a frozen copy of the v1.5.0
+        // oscillator, so improvements to the live one can't change it. These are its hashes in
+        // v1.5.0, one per platform: it is computed with std::sin and std::tan, whose last bits
+        // differ between MSVC's and glibc's maths libraries.
+       #if JUCE_WINDOWS
+        const juce::String v150PadHash = "9bbd2e8fe006ea2c";
+       #elif JUCE_LINUX
+        const juce::String v150PadHash = "bc3a2be832d2400d";
+       #else
+        const juce::String v150PadHash = a->getHash();   // no v1.5.0 reference recorded for this platform
+       #endif
+        char padWhat[160];
+        std::snprintf (padWhat, sizeof (padWhat), "the pad is the same sound as in v1.5.0 (hash %s)", a->getHash().toRawUTF8());
+        check (a->getHash() == v150PadHash, padWhat);
         check (std::abs (a->getLengthSeconds() - 4.0) < 1.0e-9, "the pad is 4 s long");
 
         const int n = a->getLength();

@@ -13,18 +13,20 @@ by **Razvan Julian Petrescu** / **AudioDSP**.
 waveform-listening exercises, the illustrated control guide and a tour of the
 C++ source. Learn the sound as a musician, or explore how it works as a coder.
 
-![Neon Synth screenshot](screenshot.png)
+![NeonSynth v1.6.0 with a sawtooth and the sequencer running](docs/images/captures/ui-oscillator-running.png)
 
 ## Features
 
 - **4 Waveforms** — Sine, Square, Triangle, Sawtooth
+- **CHOP** — after the Roland S-1's OSC CHOP: a 16-step pattern, drawn and edited on the waveform itself, cuts or flips steps of every cycle of the Oscillator or Random wave. OVERTONE sets how far (100% silences the chopped steps, 200% turns them upside down) and COMB repeats the pattern up to 32 times per cycle. The edges are band-limited
+- **Noise and Fold** — NOISE crossfades the wave into seeded white noise; FOLD folds it back on itself (a sine wavefolder, DRIVE 1–10, 2× oversampled) for brighter harmonics. Both follow CHOP, before the envelope
 - **Random** — a pitched wave of 16 random steps per cycle; one step is re-rolled about every cycle, so it keeps its pitch while its timbre drifts (the whole shape is renewed every 17 cycles). Band-limited and seeded, so the same MIDI renders the same audio
 - **Granular** — a cloud of up to 32 short grains per voice from the same sample: position, scan (moving through the file at up to ±2× its speed, or frozen), grain size, density, spray and pitch jitter; seeded, so the same MIDI renders the same audio
 - **Sample playback** — load a WAV, AIFF or FLAC file (or drop it on the window) and play it across the keyboard: root note, start point, One-shot / Loop / Loop until release with a crossfaded loop, and band-limited copies so high notes don't alias. A built-in pad plays until you load a file, and the sample is saved inside the session
 - **Low-pass Filter** — adjustable cutoff (20 Hz – 20 kHz) with on/off bypass toggle
 - **16-voice Polyphony** — up to 16 simultaneous notes, with click-free voice stealing
 - **ADSR envelope** — linear segments whose durations match the knob values; Sustain changes glide (10 ms) instead of stepping, and a release always takes the Release time, whenever the note is let go
-- **Band-limited oscillators** — PolyBLEP square and sawtooth to reduce aliasing
+- **Band-limited oscillators** — 4-point band-limited steps on the square and sawtooth and band-limited corners on the triangle, with the treble roll-off compensated
 - **Output gain** — host-automatable output level (−48 dB to +6 dB)
 - **Headroom protection** — an output soft clipper, untouched below −6 dBFS, keeps even 16 full-velocity voices under −1 dBFS
 - **Stereo width** — voices are panned by pitch (middle C centred, two octaves either side at the edges); 0% is mono, 100% full spread
@@ -60,17 +62,6 @@ Pre-built Windows installer: **[Latest release →](https://github.com/kv244/Syn
 Run `NeonSynth-x.y.z-Windows-Setup.exe`. The wizard installs the VST3 to
 `C:\Program Files\Common Files\VST3\` and optionally the standalone app to
 `C:\Program Files\AudioDSP\Neon Synth\`.
-
----
-
-## Releasing
-
-Releases are published only from a version tag; merging to `master` publishes nothing.
-
-1. Set the new version in `CMakeLists.txt` (both places) and `installer.nsi`, and merge it to `master`.
-2. Tag it: `git tag v1.5.0 && git push origin v1.5.0`.
-
-The Release workflow refuses a tag that doesn't match `CMakeLists.txt`, or one that already has a release, then runs every test and pluginval at strictness 10 before building the installer.
 
 ---
 
@@ -143,6 +134,8 @@ the **AudioDSP** manufacturer in your DAW's instrument browser.
 | Waveform | Cyan | Oscillator shape — Sine / Square / Triangle / Sawtooth (dimmed when Source isn't Oscillator) |
 | LOAD / PAD | Cyan | Load a WAV, AIFF or FLAC file (or drop one anywhere on the window); PAD returns to the built-in pad. The file name, its length and its sample rate (for example `pad.wav  2.5 s  44.1 kHz`) and any loading problem are shown beside them; a long name is shortened, and the tooltip shows the full path |
 | Loop mode | Cyan | One-shot plays to the end; Loop loops while the note sounds (release included); Loop until release loops while the key is held, then plays on to the end |
+| Shape view | Cyan | With Source = Oscillator or Random, the sample strip becomes the SHAPE strip: one cycle of the wave after CHOP and Fold, with CHOP's chopped steps shaded. Click a step to chop it (or not), drag across steps to set several. With Random it follows the levels of the lowest sounding voice |
+| OVERTONE / COMB / NOISE / DRIVE / FOLD | Cyan | The SHAPE strip's knobs: how far chopped steps are cut (0–200%), pattern repeats per cycle (1–32), white-noise mix (0–100%), fold drive (1–10) and fold mix (0–100%, 0 skips the fold) |
 | Sample view | Cyan | The waveform with the start (cyan line), the loop (amber brackets) and a white playhead per sounding voice; drag a marker to move it, click to set the start |
 | ROOT / START / L.START / L.END / XFADE | Cyan | Root key (plays the file at its own pitch), start point, loop start and end, and the loop crossfade (5–50 ms) |
 | ROOT / POS / SCAN / SIZE / DENS / SPRAY / JITTER | Magenta | With Source = Granular the knob row changes: position of the cloud (also draggable on the waveform), scan speed (−2× to +2×, 0 freezes), grain size (5–500 ms), density (1–200 grains/s), spray (how far grains scatter from the position) and pitch jitter (0–100 cents). The waveform then shows the position, the spray band and a tick per sounding grain |
@@ -204,12 +197,14 @@ ctest --test-dir build -C Release --output-on-failure
 |---|---|
 | `StepSequencerTests` | Sequencer timing, gate, swing, rates, block-size independence, stop and loop handling, tolerance of small transport drift, triggers disabled, retriggering, step packing (15 checks) |
 | `VoiceEnvelopeTests` | The voice envelope: identical to `juce::ADSR` with fixed settings, releases that survive parameter updates, sustain slew, retriggering, release-time changes (6 checks) |
-| `OscillatorTests` | The oscillators: pitch and DC offset of every waveform, level at high pitch, band-limited saw step, waveform changes waiting for the cycle boundary, phase kept across pitch changes; the Random source's repeatability, range, step statistics (one level replaced per cycle), pitch, and band-limited steps (27 checks) |
-| `SampleDataTests` | The sample: mono mix, −1 dBFS normalisation, 24-bit grid, 60 s cap, decimated copies (pitch kept, aliasing removed), exact FLAC round trip, file loading, the built-in pad, and the lock-free hand-off freeing replaced samples only when safe, including 2000 swaps under load (39 checks) |
+| `OscillatorTests` | The oscillators: pitch and DC offset of every waveform, level at high pitch, band-limited saw step, waveform changes waiting for the cycle boundary, phase kept across pitch changes; the Random source's repeatability, range, step statistics (one level replaced per cycle), pitch, and band-limited steps; aliasing of square, saw and triangle against v1.5.0 at C7 and C8, harmonic levels, the phase-step limit (44 checks) |
+| `ChopTests` | CHOP: Overtone 0% bit-identical to no CHOP, 100% silences and 200% inverts the chopped steps, Comb 1 / 2 / 8, band-limited edges, fading out as steps get too short, the Random source (14 checks) |
+| `SculptTests` | Noise and Fold: bit-identical when neutral, repeatable noise at a steady level across the knob, fold aliasing against a plain fold, peak, DC, a flat response at partial mix (8 checks) |
+| `SampleDataTests` | The sample: mono mix, −1 dBFS normalisation, 24-bit grid, 60 s cap, decimated copies (pitch kept, aliasing removed), exact FLAC round trip, file loading, the built-in pad, and the lock-free hand-off freeing replaced samples only when safe, including 2000 swaps under load (40 checks) |
 | `SampleReaderTests` | Sample playback: pitch tracking (and across sample rates), which band-limited copy each pitch reads, no aliasing at +24 semitones, steady level through crossfaded loops, smooth off-cycle loops, One-shot ends, Loop until release, start offset, the sample reference count (23 checks) |
 | `GranularTests` | The granular source: bit-identical renders from the same seed, grain counts at 5 / 50 / 200 per second, steady level across size and density, pitch, the 32-grain cap, scan speed and freeze, retrigger without cutting grains, stopping, the sample reference |
 | `RealtimeSafetyTests` | Hooks `operator new`/`delete` and fails if `processBlock` allocates or frees while rendering chords, the sequencer, every waveform and every source as another thread keeps replacing the sample |
-| `RenderBenchmark` | Times `processBlock` directly (no host) for idle, one note, 16 voices, 16 voices on each of the Sample, Random and Granular sources, and a dense sequencer + chords load |
+| `RenderBenchmark` | Times `processBlock` directly (no host) for idle, one note, 16 voices, 16 voices on each of the Sample, Random and Granular sources, 16 sculpted voices (CHOP, Noise and Fold all on), and a dense sequencer + chords load |
 
 ### Performance
 
@@ -219,9 +214,10 @@ ctest --test-dir build -C Release --output-on-failure
 |---|---|
 | Idle | 0.01% |
 | One note | 0.10% |
-| 16 voices at full velocity | 1.3% |
+| 16 voices at full velocity | 1.7% |
 | 16 voices playing the built-in sample, looped | 1.0% |
 | 16 voices on the Random source | 1.1% |
+| 16 sawtooth voices with CHOP (Overtone 100%, Comb 4), Noise 30% and Fold (Drive 5, 100%) | 5.0% |
 | 16 voices on the granular source, 32 grains each (200 grains/s of 250 ms: the worst case) | 6.2% |
 | Sequencer at 1/32, 240 BPM, plus an 8-note chord every 250 ms | 1.3% |
 
@@ -253,26 +249,34 @@ Expected output:
 
 ```
 Loading plugin …
-Parameters: ['waveform', 'cutoff', 'filter_enabled', 'attack', 'decay', 'sustain', 'release', 'output_gain_db', 'stereo_width', 'sequencer_on', 'sequencer_sync', 'sequencer_tempo', 'sequencer_rate', 'sequencer_swing', 'sequencer_gate', 'sequencer_mode', 'bypass']
+Parameters: ['source', 'waveform', 'cutoff', 'filter_enabled', 'attack', … ]
 
   PASS  Single note             RMS=0.0799
   PASS  Polyphony (4ch)         single=0.0799  chord=0.1596
   PASS  Polyphony (8ch)         RMS=0.2234
   PASS  Voice stealing          RMS=0.3051
   PASS  Release tail            tail RMS=0.052122
-  PASS  Filter cutoff           HFR@1.5kHz  200Hz=0.0000  18kHz=0.0283
-  PASS  Waveforms               Sine=0.0000  Square=0.0154  Triangle=0.0000  Sawtooth=0.0245
+  PASS  Filter cutoff           HFR@1.5kHz  200Hz=0.0000  18kHz=0.0315
+  PASS  Waveforms               Sine=0.0000  Square=0.0199  Triangle=0.0001  Sawtooth=0.0313
   PASS  Velocity scaling        vel20=0.0160  vel120=0.0959
-  PASS  Sequencer plays         on RMS=0.1121  off RMS=0.000000
+  PASS  Sequencer plays         on RMS=0.1119  off RMS=0.000000
   PASS  Sequencer timing        12 notes, worst timing error 0 samples (0.000 ms)
   PASS  No stuck note           RMS after release=0.0000000
   PASS  Close events            notes at samples 4411 and 4431 (expected 4410, 4430)
-  PASS  Headroom                16 voices +6 dB: -1.00 dBFS  single note: -12.73 dBFS
+  PASS  Headroom                16 voices +6 dB: -1.00 dBFS  single note: -12.14 dBFS
   PASS  Release mid-decay       tail RMS=0.0607  largest step=0.0093
   PASS  Sustain change          largest step=0.0093  peak after the change=0.050
   PASS  State round trip        one-step pattern: 1 note  no pattern: 12 notes (default)
+  PASS  Sample state            embedded FLAC 39 KB, hash 7cc6a876420f1755; missing file kept; v1.4 state -> default pad
+  PASS  Sample pitch            48: 130.8 Hz  60: 261.6 Hz  72: 523.2 Hz  one-shot ends
+  PASS  Granular                RMS 0.055  peak 524.3 Hz  repeat renders identical
+  PASS  Random                  RMS 0.077  correlation 0.93 at one period, 0.46 off it  repeat renders identical
+  PASS  Chop state              open 0.079  default 0.056 (70%)  all chopped 0.00000  v1.5 state -> default
+  PASS  Sculpt                  peak 523.3 Hz (harmonic 2 of C4)  above 2 kHz: 70.9% sculpted vs 7.5% plain
+  PASS  Channel 16 key          held note RMS after the sequencer note ended=0.0975
+  PASS  Log per instance        two instances wrote midi-2.log and midi-4.log
 
-16/16 passed
+24/24 passed
 ```
 
 ### Render and hear audio
@@ -354,6 +358,8 @@ a fixed 120 BPM tempo, with real time preserved via tick timing.
 | Release mid-decay | With Sustain 0, a note released during its decay fades over the Release time without a click |
 | Sustain change | Changing Sustain while a note is held ramps the level instead of clicking |
 | State round trip | The pattern is saved and restored; a state without a pattern loads the default |
+| Chop state | CHOP's pattern is saved and restored, and changes the level as expected (none, every second step, all chopped); a state from before v1.6.0 gets the default pattern |
+| Sculpt | A chopped, noisy, folded sawtooth keeps its pitch and puts far more of its energy above 2 kHz than the plain one |
 | Granular | With Source = Granular and a C4 sine loaded, C5 peaks at 523 Hz, and two renders of the same MIDI are identical |
 | Random | With Source = Random, C4 repeats itself one period later (pitched, not noise), and two renders of the same MIDI are identical |
 | Sample pitch | With Source = Sample and a C4 sine loaded, C3 / C4 / C5 sound at 130.8 / 261.6 / 523.3 Hz; One-shot goes silent when the file ends |
@@ -424,7 +430,9 @@ audio_bright = plugin.process(msgs, 2.5, SR, reset=True)
 | File | Purpose |
 |---|---|
 | `NeonSynthVoice.h` | Voice and sound classes — sound source, filter, envelope, pan |
-| `Oscillator.h` | The band-limited oscillators: sine, square, triangle, sawtooth with PolyBLEP, and the Random source's step wave |
+| `Oscillator.h` | The band-limited oscillators (sine, square, triangle, sawtooth) with 4-point band-limited steps and corners, the Random source's step wave, and CHOP |
+| `Sculpt.h` | Noise and Fold: white-noise crossfade and a 2× oversampled sine wavefolder |
+| `ShapeView.h` | The SHAPE strip's drawing of one cycle, with CHOP step editing |
 | `SampleData.h` | A prepared sample: mono, normalised, 24-bit grid, with 1/2- and 1/4-rate copies |
 | `SampleSlot.h` | Lock-free hand-off of the current sample to the audio thread; frees replaced samples only when safe |
 | `SampleLoader.h` | Loads WAV, AIFF and FLAC files and embedded FLAC; renders the built-in pad |
@@ -441,6 +449,8 @@ audio_bright = plugin.process(msgs, 2.5, SR, reset=True)
 | `tests/StepSequencerTests.cpp` | Unit tests for the sequencer engine (`-DNEONSYNTH_BUILD_TESTS=ON`) |
 | `tests/VoiceEnvelopeTests.cpp` | Unit tests for the voice envelope |
 | `tests/OscillatorTests.cpp` | Unit tests for the oscillators, including Random |
+| `tests/ChopTests.cpp` | Unit tests for CHOP |
+| `tests/SculptTests.cpp` | Unit tests for Noise and Fold |
 | `tests/SampleDataTests.cpp` | Unit tests for the sample, its loader and the hand-off |
 | `tests/SampleReaderTests.cpp` | Unit tests for sample playback |
 | `tests/GranularTests.cpp` | Unit tests for the granular source |
@@ -451,11 +461,18 @@ audio_bright = plugin.process(msgs, 2.5, SR, reset=True)
 | `gui_background.png` | Neon grid background image (embedded as binary data) |
 | `icon.png` | Application / plugin icon |
 | `test_midi.py` | Automated Python test suite |
+| `log_to_midi.py` | Converts a captured `midi.log` into a Standard MIDI File |
+| `docs/NeonSynth-User-Manual.md` | The user manual |
+| `docs/build_manual.py` | Checks the manual against the release (version, cover, links) and prints it to PDF |
+| `docs/figures/` | Scripts that draw the manual's figures and cover, with a README on remaking them |
+| `docs/images/` | The manual's figures and cover (SVG and PNG), and the raw application captures |
+| `docs/requirements-manual.txt` | Pinned Python dependencies for the PDF build |
 | `pyproject.toml` | Ruff lint configuration |
 | `.github/workflows/test.yml` | CI on every PR — Windows build, unit tests, Python suite, pluginval (strictness 5), CPU benchmark |
 | `.github/workflows/build.yml` | CI — CMake build and unit tests on Ubuntu (GCC) |
-| `.github/workflows/lint.yml` | CI — Python ruff lint |
-| `.github/workflows/release.yml` | Release on a version tag — all tests, pluginval (strictness 10), installer, GitHub Release |
+| `.github/workflows/lint.yml` | CI — ruff lint of every Python file |
+| `.github/workflows/manual.yml` | CI — checks the manual against the version and builds its PDF |
+| `.github/workflows/release.yml` | Release on a version tag — manual check, all tests, pluginval (strictness 10), installer, GitHub Release with the manual PDF |
 | `requirements-test.txt` | Pinned Python dependencies for `test_midi.py` |
 | `installer.nsi` | NSIS installer script (VST3 + Standalone) |
 | `LICENSE` | GNU Affero General Public License v3 |

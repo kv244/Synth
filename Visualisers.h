@@ -68,11 +68,22 @@ namespace neon
 }
 
 //==============================================================================
+/**
+    How much longer the displays' windows are at this sample rate than at 48 kHz:
+    1 up to 48 kHz, 2 at 88.2 and 96 kHz, 4 at 176.4 and 192 kHz. Scaling by it
+    keeps the scope showing the same time span, and the spectrum the same
+    frequency resolution, at every sample rate.
+*/
+inline int displayRateFactor (double sampleRate) noexcept
+{
+    return sampleRate > 120000.0 ? 4 : sampleRate > 60000.0 ? 2 : 1;
+}
+
 /** Rolling copy of the most recent output samples, filled from the scope FIFO. */
 class SignalHistory
 {
 public:
-    static constexpr int size = 8192;   // power of two
+    static constexpr int size = 1 << 15;   // power of two; holds the largest FFT (2^14, at 192 kHz) twice over
 
     void push (const float* samples, int numSamples) noexcept
     {
@@ -109,14 +120,17 @@ class OscilloscopeView : public juce::Component
 public:
     void update (const SignalHistory& history, double sampleRate, float lowestNoteHz)
     {
+        // Window lengths scale with the sample rate, so the scope shows the same span of time at every rate.
+        const int factor = displayRateFactor (sampleRate);
+        const int searchLength = baseSearchLength * factor, maxDisplay = baseMaxDisplay * factor;
         history.copyLatest (recent.data(), searchLength);
 
         const double period = (lowestNoteHz > 0.0f && sampleRate > 0.0) ? sampleRate / lowestNoteHz : 0.0;
-        displayLength = period > 0.0 ? juce::jlimit (128, maxDisplay, (int) std::lround (2.0 * period)) : 1024;
+        displayLength = period > 0.0 ? juce::jlimit (128, maxDisplay, (int) std::lround (2.0 * period)) : 1024 * factor;
 
         // Walk back from the newest possible start to the nearest rising zero crossing.
         const int latestStart = searchLength - displayLength;
-        const int span        = period > 0.0 ? (int) std::ceil (period) + 2 : 1024;
+        const int span        = period > 0.0 ? (int) std::ceil (period) + 2 : 1024 * factor;
         int start = latestStart;
 
         for (int i = latestStart; i > juce::jmax (1, latestStart - span); --i)
@@ -218,11 +232,11 @@ public:
     }
 
 private:
-    static constexpr int searchLength = 4096;
-    static constexpr int maxDisplay   = 2048;
+    static constexpr int baseSearchLength = 4096;   // at 48 kHz; times displayRateFactor()
+    static constexpr int baseMaxDisplay   = 2048;
 
-    std::array<float, searchLength> recent {};
-    std::array<float, maxDisplay>   display {};
+    std::array<float, baseSearchLength * 4> recent {};
+    std::array<float, baseMaxDisplay * 4>   display {};
     int   displayLength = 1024;
     float range = 0.25f;
     float lockHz = 0.0f;
@@ -231,7 +245,9 @@ private:
 
 //==============================================================================
 /**
-    Spectrum analyser (4096-point FFT, log frequency axis) with the low-pass
+    Spectrum analyser (log frequency axis; a 4096-point FFT at 48 kHz, scaled
+    with the sample rate to keep the same resolution, up to 16384 points at
+    192 kHz) with the low-pass
     filter's response drawn on top. The filter curve is computed from the
     cutoff parameter, so it moves the instant the knob does.
 */
@@ -240,11 +256,7 @@ class SpectrumView : public juce::Component
 public:
     SpectrumView()
     {
-        for (size_t n = 0; n < (size_t) fftSize; ++n)
-        {
-            window[n] = 0.5f - 0.5f * std::cos (juce::MathConstants<float>::twoPi * (float) n / (float) (fftSize - 1));
-            windowSum += window[n];
-        }
+        setFftOrder (baseFftOrder);
         levels.fill (minDb);
     }
 
@@ -255,11 +267,16 @@ public:
         cutoffHz   = newCutoffHz;
         filterOn   = newFilterOn;
 
+        const int order = baseFftOrder + (displayRateFactor (sampleRate) == 4 ? 2 : displayRateFactor (sampleRate) == 2 ? 1 : 0);
+        if (order != fftOrder)
+            setFftOrder (order);   // message thread: rebuilding the window here is fine
+        const int fftSize = 1 << fftOrder;
+
         history.copyLatest (fftData.data(), fftSize);
         juce::FloatVectorOperations::multiply (fftData.data(), window.data(), fftSize);   // Hann window, SIMD
         std::fill (fftData.begin() + fftSize, fftData.end(), 0.0f);
 
-        fft.performFrequencyOnlyForwardTransform (fftData.data());
+        ffts[(size_t) (fftOrder - baseFftOrder)].performFrequencyOnlyForwardTransform (fftData.data());
 
         const double binHz = sampleRate / fftSize;
         const float  norm  = 2.0f / windowSum;   // full-scale sine -> 0 dBFS
@@ -382,9 +399,21 @@ public:
     }
 
 private:
-    static constexpr int   fftOrder  = 12;
-    static constexpr int   fftSize   = 1 << fftOrder;
+    static constexpr int   baseFftOrder = 12;   // 4096 points at 48 kHz
+    static constexpr int   maxFftSize   = 1 << (baseFftOrder + 2);
     static constexpr int   numPoints = 160;
+
+    void setFftOrder (int order)
+    {
+        fftOrder = order;
+        const int size = 1 << order;
+        windowSum = 0.0f;
+        for (int n = 0; n < size; ++n)
+        {
+            window[(size_t) n] = 0.5f - 0.5f * std::cos (juce::MathConstants<float>::twoPi * (float) n / (float) (size - 1));
+            windowSum += window[(size_t) n];
+        }
+    }
     static constexpr float minDb     = -96.0f;
     static constexpr float minHz     = 20.0f;
 
@@ -406,9 +435,10 @@ private:
         return juce::jmap (juce::jlimit (minDb, 0.0f, db), minDb, 0.0f, area.getBottom(), area.getY());
     }
 
-    juce::dsp::FFT fft { fftOrder };
-    std::array<float, 2 * fftSize> fftData {};
-    std::array<float, fftSize> window {};
+    std::array<juce::dsp::FFT, 3> ffts { juce::dsp::FFT (baseFftOrder), juce::dsp::FFT (baseFftOrder + 1), juce::dsp::FFT (baseFftOrder + 2) };
+    int fftOrder = baseFftOrder;
+    std::array<float, 2 * maxFftSize> fftData {};
+    std::array<float, maxFftSize> window {};
     float windowSum = 0.0f;
     std::array<float, numPoints> levels {};
 

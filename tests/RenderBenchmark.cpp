@@ -12,9 +12,13 @@
       16 voices - 16 notes held at full velocity (soft clipper working hard)
       sample 16 - the same 16 notes playing the built-in pad (Source = Sample, looped)
       random 16 - the same 16 notes on the Random source
+      sculpt 16 - the same 16 notes on a sawtooth with CHOP, Noise and Fold all on (v1.6.0)
       granular  - the same 16 notes on the granular source at 200 grains/s of 250 ms,
                   so every voice runs its full 32 grains (the worst case)
       dense     - sequencer at 1/32 and 240 BPM plus an 8-note chord every 250 ms
+
+    It first times creating a processor (what a host does when it loads the plugin):
+    the first instance in the process, then the average of the next ten.
 
     Build with CMake:  cmake -B build -DJUCE_DIR=... -DNEONSYNTH_BUILD_TESTS=ON
                        cmake --build build --config Release --target RenderBenchmark
@@ -91,6 +95,18 @@ int main()
     juce::ScopedJuceInitialiser_GUI juce;   // the processor's editor code needs the message manager
     const auto noChange = [] (juce::AudioProcessor&) {};
 
+    const auto millisecondsToCreate = []
+    {
+        const auto start = std::chrono::steady_clock::now();
+        { NeonSynthProcessor processor; }
+        return std::chrono::duration<double, std::milli> (std::chrono::steady_clock::now() - start).count();
+    };
+    const double firstInstance = millisecondsToCreate();
+    double laterInstances = 0.0;
+    for (int i = 0; i < 10; ++i)
+        laterInstances += millisecondsToCreate() / 10.0;
+    std::printf ("New instance: %.1f ms the first time in the process, %.1f ms after that\n\n", firstInstance, laterInstances);
+
     std::printf ("Render benchmark (48 kHz, %d-sample blocks)\n", benchBlockSize);
 
     report ("idle",     render ([] (juce::MidiBuffer&, juce::int64) {}, noChange));
@@ -100,6 +116,16 @@ int main()
                                  [] (juce::AudioProcessor& p) { setParameter (p, "source", 1.0f); }));   // the built-in pad, looped
     report ("random 16", render (held ({ 48, 50, 52, 53, 55, 57, 59, 60, 62, 64, 65, 67, 69, 71, 72, 74 }, 127),
                                  [] (juce::AudioProcessor& p) { setParameter (p, "source", 3.0f); }));   // the Random source
+    report ("sculpt 16", render (held ({ 48, 50, 52, 53, 55, 57, 59, 60, 62, 64, 65, 67, 69, 71, 72, 74 }, 127),
+                                 [] (juce::AudioProcessor& p)
+                                 {
+                                     setParameter (p, "waveform", 3.0f);         // sawtooth
+                                     setParameter (p, "chopOvertone", 100.0f);   // CHOP, Noise and Fold all on
+                                     setParameter (p, "chopComb", 4.0f);
+                                     setParameter (p, "noiseLevel", 30.0f);
+                                     setParameter (p, "foldDrive", 5.0f);
+                                     setParameter (p, "foldMix", 100.0f);
+                                 }));
     report ("granular", render (held ({ 48, 50, 52, 53, 55, 57, 59, 60, 62, 64, 65, 67, 69, 71, 72, 74 }, 127),
                                 [] (juce::AudioProcessor& p)
                                 {

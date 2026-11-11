@@ -128,6 +128,18 @@ juce::AudioProcessorValueTreeState::ParameterLayout NeonSynthProcessor::createPa
     layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "grSpray", 1 }, "Grain Spray", 0.0f, 1.0f, 0.1f));
     layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "grJitter", 1 }, "Grain Pitch Jitter",
                                                         NormalisableRange<float> (0.0f, 100.0f, 0.1f), 0.0f));          // cents
+
+    // Waveform sculpting (v1.6.0), for the Oscillator and Random sources. Each default leaves the
+    // sound as it was, so sessions saved before v1.6.0 render the same.
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "chopOvertone", 1 }, "Chop Overtone",
+                                                        NormalisableRange<float> (0.0f, 200.0f, 0.1f), 0.0f));          // %: chopped steps x (1 - Overtone/100)
+    layout.add (std::make_unique<AudioParameterInt>   (ParameterID { "chopComb", 1 }, "Chop Comb", 1, 32, 1));      // pattern repeats per cycle
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "noiseLevel", 1 }, "Noise",
+                                                        NormalisableRange<float> (0.0f, 100.0f, 0.1f), 0.0f));          // %: crossfade to white noise
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "foldDrive", 1 }, "Fold Drive",
+                                                        NormalisableRange<float> (1.0f, 10.0f, 0.01f), 3.0f));
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "foldMix", 1 }, "Fold Mix",
+                                                        NormalisableRange<float> (0.0f, 100.0f, 0.1f), 0.0f));          // %: 0 skips the fold
     return layout;
 }
 
@@ -179,6 +191,11 @@ NeonSynthProcessor::NeonSynthProcessor()
     grDensityParameter     = getTypedParameter<juce::AudioParameterFloat>  (apvts, "grDensity");
     grSprayParameter       = getTypedParameter<juce::AudioParameterFloat>  (apvts, "grSpray");
     grJitterParameter      = getTypedParameter<juce::AudioParameterFloat>  (apvts, "grJitter");
+    chopOvertoneParameter  = getTypedParameter<juce::AudioParameterFloat>  (apvts, "chopOvertone");
+    chopCombParameter      = getTypedParameter<juce::AudioParameterInt>    (apvts, "chopComb");
+    noiseLevelParameter    = getTypedParameter<juce::AudioParameterFloat>  (apvts, "noiseLevel");
+    foldDriveParameter     = getTypedParameter<juce::AudioParameterFloat>  (apvts, "foldDrive");
+    foldMixParameter       = getTypedParameter<juce::AudioParameterFloat>  (apvts, "foldMix");
 
     loadDefaultPattern();
     publishSample (SampleLoader::makeDefaultSample());
@@ -249,6 +266,8 @@ void NeonSynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
                               smpLoopStartParameter->get(), smpLoopEndParameter->get(), smpXfadeParameter->get() * 0.001f };
     params.grainSettings  = { grPosParameter->get(), grScanParameter->get(), grSizeParameter->get() * 0.001f,
                               grDensityParameter->get(), grSprayParameter->get(), grJitterParameter->get() };
+    params.chop = { chopPattern.load (std::memory_order_relaxed), chopCombParameter->get(), chopOvertoneParameter->get() * 0.01f };
+    params.sculpt = { noiseLevelParameter->get() * 0.01f, foldDriveParameter->get(), foldMixParameter->get() * 0.01f };
 
     // Every voice shares the same settings. TODO: per-voice detune for unison, or extra harmonics.
     for (auto* v : voices)
@@ -307,6 +326,10 @@ void NeonSynthProcessor::publishVoiceViews() noexcept
         v.samplePosition .store (t.samplePosition,  std::memory_order_relaxed);
         for (size_t g = 0; g < v.grainPositions.size(); ++g)
             v.grainPositions[g].store ((int) g < t.numGrains ? t.grainPositions[g] : -1.0f, std::memory_order_relaxed);
+        v.playingRandom.store (t.playingRandom, std::memory_order_relaxed);
+        if (t.playingRandom)
+            for (size_t k = 0; k < v.randomLevels.size(); ++k)
+                v.randomLevels[k].store (t.randomLevels[k], std::memory_order_relaxed);
     }
 }
 
@@ -345,11 +368,37 @@ namespace
           (none) v1.0 - v1.3: parameters, the editor's view and, from v1.3, the pattern
           2      v1.4: same content; the attribute exists so later format changes
                  can tell old sessions apart and migrate them
-          3      v1.5+: adds the Sample child (the sample, embedded or by path);
+          3      v1.5: adds the Sample child (the sample, embedded or by path);
                  older states load with the built-in pad
+          4      v1.6+: adds the Chop child (CHOP's 16-step pattern); older
+                 states load with the default pattern (every second step)
     */
     const juce::Identifier stateVersionId { "stateVersion" };
-    constexpr int currentStateVersion = 3;
+    constexpr int currentStateVersion = 4;
+
+    // State tree layout for CHOP's pattern (v1.6.0+): <Chop pattern="0101010101010101"/>,
+    // one character per step, step 1 first, "1" = chopped.
+    const juce::Identifier chopId        { "Chop" };
+    const juce::Identifier chopPatternId { "pattern" };
+
+    juce::String chopPatternToString (juce::uint16 pattern)
+    {
+        juce::String text;
+        for (int i = 0; i < Chop::stepsPerPattern; ++i)
+            text << (((pattern >> i) & 1u) != 0 ? "1" : "0");
+        return text;
+    }
+
+    juce::uint16 chopPatternFromString (const juce::String& text, juce::uint16 fallback)
+    {
+        if (text.length() != Chop::stepsPerPattern || ! text.containsOnly ("01"))
+            return fallback;
+        juce::uint16 pattern = 0;
+        for (int i = 0; i < Chop::stepsPerPattern; ++i)
+            if (text[i] == '1')
+                pattern = (juce::uint16) (pattern | (1u << i));
+        return pattern;
+    }
 
     // State tree layout for the sample (v1.5.0+):
     //   <Sample default="1"/>                                  the built-in pad
@@ -626,6 +675,12 @@ void NeonSynthProcessor::getStateInformation (juce::MemoryBlock& destData)
     }
     state.appendChild (pattern, nullptr);
 
+    if (auto previous = state.getChildWithName (chopId); previous.isValid())
+        state.removeChild (previous, nullptr);
+    juce::ValueTree chop (chopId);
+    chop.setProperty (chopPatternId, chopPatternToString (chopPattern.load()), nullptr);
+    state.appendChild (chop, nullptr);
+
     if (auto previous = state.getChildWithName (sampleId); previous.isValid())
         state.removeChild (previous, nullptr);
 
@@ -684,7 +739,22 @@ void NeonSynthProcessor::setStateInformation (const void* data, int sizeInBytes)
                                 (int)  step.getProperty (velocityId, 100) });
     }
 
+    // CHOP's pattern; states from before v1.6.0 have none and get the default.
+    chopPattern.store (chopPatternFromString (tree.getChildWithName (chopId).getProperty (chopPatternId).toString(),
+                                              ChopSettings().pattern));
+
     restoreSample (tree.getChildWithName (sampleId));
+}
+
+void NeonSynthProcessor::setChopStep (int step, bool chopped) noexcept
+{
+    if (step < 0 || step >= Chop::stepsPerPattern)
+        return;
+    const auto bit = (juce::uint16) (1u << step);
+    auto current = chopPattern.load();
+    while (! chopPattern.compare_exchange_weak (current, chopped ? (juce::uint16) (current | bit) : (juce::uint16) (current & ~bit)))
+    {
+    }
 }
 
 void NeonSynthProcessor::restoreSample (const juce::ValueTree& sampleTree)
