@@ -144,6 +144,25 @@ public:
     */
     mutable std::atomic<int> users { 0 };
 
+    /**
+        A separate sample with the same audio, levels, hash and origin, and no users. Copying
+        a prepared sample is far cheaper than preparing one (SampleLoader keeps one prepared
+        default pad and hands out copies).
+        Allocates: loader or message thread only.
+    */
+    std::unique_ptr<SampleData> copy() const
+    {
+        std::unique_ptr<SampleData> data (new SampleData());
+        data->origin       = origin;
+        data->sampleRate   = sampleRate;
+        data->truncated    = truncated;
+        data->levels       = levels;
+        data->lengths      = lengths;
+        data->hash         = hash;
+        data->embeddedFlac = embeddedFlac;
+        return data;
+    }
+
     static constexpr float fullScale24 = 8388608.0f;   // 2^23
 
     /** The 24-bit integer a sample on the grid stands for (-2^23 .. 2^23 - 1). */

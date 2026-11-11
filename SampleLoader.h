@@ -170,7 +170,8 @@ namespace SampleLoader
         int   waveform = sine, pendingWaveform = sine;
     };
 
-    inline std::unique_ptr<SampleData> makeDefaultSample()
+    /** Renders and prepares the built-in pad from scratch (about 16 ms); see makeDefaultSample(). */
+    inline std::unique_ptr<SampleData> renderDefaultSample()
     {
         const int length = (int) (defaultSampleSeconds * defaultSampleRate);
         const auto root = (float) juce::MidiMessage::getMidiNoteInHertz (defaultRootNote);
@@ -225,5 +226,19 @@ namespace SampleLoader
         auto sample = SampleData::create (buffer, defaultSampleRate, { "Default pad", {}, true }, error);
         jassert (sample != nullptr);
         return sample;
+    }
+
+    /**
+        The built-in pad, as a sample of its own. Rendering and preparing it (the oscillators,
+        normalising, rounding to 24 bits, the two half-rate copies and the hash) was nearly all
+        of the time it took to create a NeonSynth instance (about 16 of 20 ms in RenderBenchmark
+        on Linux, every time). It is the same every time, so it is prepared once per process (on
+        first use; C++ makes the first use thread-safe) and every caller gets a copy, which is
+        identical down to the hash.
+    */
+    inline std::unique_ptr<SampleData> makeDefaultSample()
+    {
+        static const std::unique_ptr<SampleData> prepared = renderDefaultSample();
+        return prepared->copy();
     }
 }
