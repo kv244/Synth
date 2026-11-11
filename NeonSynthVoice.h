@@ -6,6 +6,7 @@
 #include <JuceHeader.h>
 #include "VoiceEnvelope.h"
 #include "Oscillator.h"
+#include "Sculpt.h"
 #include "SampleReader.h"
 #include "GrainCloud.h"
 
@@ -55,6 +56,8 @@ public:
         const SampleData* sample = nullptr;       // this block's sample (SampleSlot::beginBlock)
         SampleReader::Settings sampleSettings;    // latched at each note-on
         GrainCloud::Settings grainSettings;       // live: applies to the next grains
+        ChopSettings chop;                        // Oscillator and Random; pattern and Comb take effect at a cycle boundary
+        SculptSettings sculpt;                    // Oscillator and Random: Noise, then Fold
     };
 
     /** What the editor's visualisers need to know about this voice. */
@@ -69,6 +72,8 @@ public:
         static constexpr int maxShownGrains = 8;
         std::array<float, maxShownGrains> grainPositions {};   // read positions 0..1 of up to 8 sounding grains
         int numGrains = 0;
+        bool playingRandom = false;      // the note plays the Random source
+        std::array<float, RandomStepOscillator::numSteps> randomLevels {};   // its current 16 levels (for the shape view)
     };
 
     Telemetry getTelemetry() const noexcept
@@ -82,6 +87,9 @@ public:
         t.samplePosition  = t.active && source == Source::sample && reader.isActive() && ! reader.hasFinished()
                               ? reader.getPosition() : -1.0f;
         t.numGrains       = t.active && cloud.isActive() ? cloud.getGrainPositions (t.grainPositions.data(), Telemetry::maxShownGrains) : 0;
+        t.playingRandom   = t.active && source == Source::random;
+        if (t.playingRandom)
+            t.randomLevels = randomOscillator.getLevels();
         return t;
     }
 
@@ -106,6 +114,9 @@ public:
         sampleRate = newSampleRate;
         adsr.setSampleRate (newSampleRate);
         adsr.reset();
+        oscillator.prepare (newSampleRate);        // CHOP's Overtone glide
+        randomOscillator.prepare (newSampleRate);
+        sculpt.prepare (newSampleRate);
 
         filter.prepare ({ newSampleRate, (juce::uint32) maxBlockSize, 1 });
         cloudBuffer.assign ((size_t) juce::jmax (1, maxBlockSize), 0.0f);   // the granular source renders a block at a time
@@ -134,6 +145,9 @@ public:
             adsr.setParameters (adsrParams);
 
         oscillator.setWaveform (p.waveform);              // applied at the next cycle boundary
+        oscillator.setChop (p.chop);
+        randomOscillator.setChop (p.chop);
+        sculpt.set (p.sculpt);
         cutoff.setTargetValue (clampCutoff (p.cutoffHz));
         filterMix.setTargetValue (p.filterOn ? 1.0f : 0.0f);
 
@@ -383,9 +397,9 @@ private:
     /** The current note's sound source, one sample. */
     float nextSourceSample (bool cloudSounds) noexcept
     {
-        float out = source == Source::oscillator ? oscillator.nextSample()
+        float out = source == Source::oscillator ? sculpt.process (oscillator.nextSample())      // CHOP is inside the oscillators;
                   : source == Source::sample     ? reader.nextSample()
-                  : source == Source::random     ? randomOscillator.nextSample()
+                  : source == Source::random     ? sculpt.process (randomOscillator.nextSample()) // Noise and Fold follow it
                                                  : 0.0f;
 
         if (cloudSounds)
@@ -408,6 +422,7 @@ private:
     Source source = Source::oscillator, pendingSource = Source::oscillator;
     PolyBlepOscillator oscillator;
     RandomStepOscillator randomOscillator;   // the Random source
+    Sculpt sculpt;                           // Noise and Fold, after CHOP
 
     // Sample source
     const SampleData* blockSample = nullptr;   // this block's sample, from setParameters()
@@ -431,6 +446,7 @@ public:
     {
         noteCounter = 0;
         randomOscillator.reseed ((juce::uint32) (voiceIndex + 1) * 2654435761u);
+        sculpt.reseed ((juce::uint32) (voiceIndex + 1) * 2246822519u);
     }
 
 private:

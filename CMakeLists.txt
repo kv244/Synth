@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(NeonSynth VERSION 1.5.0 LANGUAGES C CXX)
+project(NeonSynth VERSION 1.6.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -19,7 +19,7 @@ add_subdirectory("${JUCE_DIR}" "${CMAKE_BINARY_DIR}/JUCE")
 add_compile_options($<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>>:-ffp-contract=off>)
 
 juce_add_plugin(NeonSynth
-    VERSION                     1.5.0
+    VERSION                     1.6.0
     COMPANY_NAME                "AudioDSP"
     COMPANY_WEBSITE             "https://audiodsp.com"
     BUNDLE_ID                   "com.audiodsp.neonsynth"
@@ -57,12 +57,14 @@ target_sources(NeonSynth
         HelpOverlay.h
         VoiceEnvelope.h
         Oscillator.h
+        Sculpt.h
         SampleData.h
         SampleSlot.h
         SampleLoader.h
         SampleReader.h
         GrainCloud.h
         SampleView.h
+        ShapeView.h
 )
 
 target_compile_definitions(NeonSynth
@@ -110,7 +112,7 @@ option(NEONSYNTH_BUILD_TESTS "Build the unit tests and the render benchmark" OFF
 
 if(NEONSYNTH_BUILD_TESTS)
     enable_testing()
-    set(NEONSYNTH_UNIT_TESTS StepSequencerTests VoiceEnvelopeTests OscillatorTests SampleDataTests SampleReaderTests GranularTests)
+    set(NEONSYNTH_UNIT_TESTS StepSequencerTests VoiceEnvelopeTests OscillatorTests ChopTests SculptTests SampleDataTests SampleReaderTests GranularTests)
     add_custom_target(unit_tests)
 
     foreach(test ${NEONSYNTH_UNIT_TESTS})
