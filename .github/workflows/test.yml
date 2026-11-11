@@ -79,7 +79,8 @@ jobs:
           cmake --build ..\reference-build --config Release --parallel --target NeonSynth_VST3
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           New-Item -ItemType Directory reference | Out-Null
-          Copy-Item -Recurse ..\reference-build\NeonSynth_artefacts\Release\VST3\NeonSynth.vst3 reference\
+          Copy-Item -Recurse -Path ..\reference-build\NeonSynth_artefacts\Release\VST3\NeonSynth.vst3 -Destination reference\NeonSynth.vst3
+          Get-ChildItem -Recurse reference | Select-Object -ExpandProperty FullName
 
       - name: Sessions from the reference release render identically
         run: python tests/compare_versions.py reference/NeonSynth.vst3 build/NeonSynth_artefacts/Release/VST3/NeonSynth.vst3

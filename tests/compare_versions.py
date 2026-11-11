@@ -72,6 +72,14 @@ SESSIONS = {
 }
 
 
+def plugin_path(vst: str) -> str:
+    """An absolute path pedalboard can load. On Windows that is the DLL inside the bundle
+    (Contents/x86_64-win/NeonSynth.vst3), as test_midi.py uses; elsewhere the bundle itself."""
+    path = Path(vst).resolve()
+    inner = path / "Contents" / "x86_64-win" / path.name
+    return str(inner if sys.platform == "win32" and inner.is_file() else path)
+
+
 def render(vst: str, out: str) -> None:
     import pedalboard
     probe = pedalboard.load_plugin(vst)
@@ -99,7 +107,7 @@ def main() -> int:
         print(__doc__)
         return 2
 
-    old_vst, new_vst = sys.argv[1], sys.argv[2]
+    old_vst, new_vst = (plugin_path(v) for v in sys.argv[1:3])
     with tempfile.TemporaryDirectory() as tmp:
         outs = []
         for i, vst in enumerate((old_vst, new_vst)):
