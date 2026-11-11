@@ -60,10 +60,15 @@ SESSIONS = {
     "granular": (dict(source="Granular", grain_position=0.3, grain_scan=0.5, grain_size=120.0,
                       grain_density=60.0, grain_spray=0.4, grain_pitch_jitter=20.0), CHORD, 2.4),
     "granular-frozen": (dict(source="Granular", grain_scan=0.0, grain_size=40.0, grain_density=150.0), LINE, 2.5),
-    "sequencer": (dict(sequencer_on=True, sequencer_sync=False, sequencer_tempo=140.0, sequencer_rate="1/16",
-                       sequencer_swing=0.3, sequencer_gate=0.6), [], 2.5),
-    "sequencer-transpose": (dict(sequencer_on=True, sequencer_sync=False, sequencer_mode="Transpose",
-                                 sequencer_rate="1/8T"), [(64, 0.0, 2.0, 100)], 2.5),
+    # The sequencer in Transpose mode: it plays only while a key is held, so nothing sounds before the
+    # render starts. (Layer mode with Sync off is not repeatable under pedalboard, which runs the
+    # plugin while it applies parameters, so the free-running clock has already started: two
+    # renders of the same build differ. StepSequencerTests cover its timing instead.)
+    "sequencer-transpose": (dict(sequencer_sync=False, sequencer_mode="Transpose", sequencer_rate="1/8T",
+                                 sequencer_on=True), [(64, 0.0, 2.0, 100)], 2.5),
+    "sequencer-swing-gate": (dict(sequencer_sync=False, sequencer_mode="Transpose", sequencer_tempo=140.0,
+                                  sequencer_rate="1/16", sequencer_swing=0.3, sequencer_gate=0.8, sequencer_on=True),
+                             [(55, 0.0, 1.0, 100), (60, 1.2, 2.2, 100)], 2.6),
 }
 
 
