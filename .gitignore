@@ -3,3 +3,4 @@ build/
 .vs/
 NeonSynth-*-Windows-Setup.exe
 __pycache__/
+.manual-print.html

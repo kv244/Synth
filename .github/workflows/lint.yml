@@ -2,9 +2,9 @@ name: Lint
 
 on:
   push:
-    branches: [master, main]
+    branches: [master, main, oscillators]
   pull_request:
-    branches: [master, main]
+    branches: [master, main, oscillators]
 
 permissions:
   contents: read
@@ -23,5 +23,5 @@ jobs:
       - name: Install ruff
         run: pip install ruff==0.16.9
 
-      - name: Lint test_midi.py
-        run: ruff check test_midi.py
+      - name: Lint every Python file (test suite, tools, manual and figure scripts)
+        run: ruff check .
