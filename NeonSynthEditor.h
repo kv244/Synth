@@ -344,6 +344,31 @@ public:
         addAndMakeVisible (helpButton);
         addChildComponent (helpOverlay);   // added last, so it sits above every control
 
+        // Component IDs: a control attached to a parameter carries that parameter's ID, and the
+        // views and buttons carry the names below. EditorTests finds everything by these IDs
+        // alone, so any layout that keeps them passes the same tests.
+        const std::pair<juce::Component*, const char*> ids[] = {
+            { &waveformCombo, "waveform" }, { &sourceCombo, "source" }, { &smpLoopCombo, "smpLoop" },
+            { &smpRootKnob, "smpRoot" }, { &smpStartKnob, "smpStart" }, { &smpLoopStartKnob, "smpLoopStart" },
+            { &smpLoopEndKnob, "smpLoopEnd" }, { &smpXfadeKnob, "smpXfade" },
+            { &grPosKnob, "grPos" }, { &grScanKnob, "grScan" }, { &grSizeKnob, "grSize" },
+            { &grDensityKnob, "grDensity" }, { &grSprayKnob, "grSpray" }, { &grJitterKnob, "grJitter" },
+            { &chopOvertoneKnob, "chopOvertone" }, { &chopCombKnob, "chopComb" }, { &noiseKnob, "noiseLevel" },
+            { &foldDriveKnob, "foldDrive" }, { &foldMixKnob, "foldMix" },
+            { &attackKnob, "attack" }, { &decayKnob, "decay" }, { &sustainKnob, "sustain" }, { &releaseKnob, "release" },
+            { &cutoffSlider, "cutoff" }, { &filterToggle, "filterEnabled" },
+            { &gainSlider, "gain" }, { &widthSlider, "width" },
+            { &seqOnButton, "seqOn" }, { &seqSyncButton, "seqSync" }, { &seqTempoSlider, "seqTempo" },
+            { &seqRateCombo, "seqRate" }, { &seqModeCombo, "seqMode" }, { &seqSwingSlider, "seqSwing" },
+            { &seqGateSlider, "seqGate" },
+            { &sampleView, "sampleView" }, { &shapeView, "shapeView" }, { &stepGrid, "stepGrid" },
+            { &adsrView, "adsrView" }, { &oscilloscope, "scopeView" }, { &spectrum, "spectrumView" },
+            { &scopeButton, "scopeButton" }, { &spectrumButton, "spectrumButton" },
+            { &loadButton, "loadButton" }, { &padButton, "padButton" },
+            { &helpButton, "helpButton" }, { &helpOverlay, "helpOverlay" } };
+        for (const auto& [component, id] : ids)
+            component->setComponentID (id);
+
         // The chosen view is GUI state, saved with the plugin's state but not automatable.
         setView ((int) apvts.state.getProperty (viewPropertyId, 0));
 

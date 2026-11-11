@@ -8,13 +8,13 @@ name: Manual
 
 on:
   push:
-    branches: [master, main, oscillators]
+    branches: [master, main, 'v[0-9]*']
     paths:
       - 'docs/**'
       - 'CMakeLists.txt'
       - '.github/workflows/manual.yml'
   pull_request:
-    branches: [master, main, oscillators]
+    branches: [master, main, 'v[0-9]*']
     paths:
       - 'docs/**'
       - 'CMakeLists.txt'

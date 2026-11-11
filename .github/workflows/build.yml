@@ -2,9 +2,9 @@ name: Build
 
 on:
   push:
-    branches: [master, main, oscillators]
+    branches: [master, main, 'v[0-9]*']
   pull_request:
-    branches: [master, main, oscillators]
+    branches: [master, main, 'v[0-9]*']
 
 permissions:
   contents: read
@@ -24,7 +24,8 @@ jobs:
             libasound2-dev \
             libx11-dev libxcomposite-dev libxcursor-dev \
             libxext-dev libxinerama-dev libxrandr-dev libxrender-dev \
-            libfreetype6-dev libglib2.0-dev libgl1-mesa-dev libgtk-3-dev
+            libfreetype6-dev libglib2.0-dev libgl1-mesa-dev libgtk-3-dev \
+            xvfb
 
       - name: Install WebKit (name differs between Ubuntu 22.04 / 24.04)
         run: |
@@ -55,4 +56,4 @@ jobs:
         run: cmake --build build --target NeonSynth_VST3 unit_tests
 
       - name: Unit tests (GCC)
-        run: ctest --test-dir build --output-on-failure
+        run: xvfb-run -a ctest --test-dir build --output-on-failure   # EditorTests needs an X display
