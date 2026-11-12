@@ -559,6 +559,25 @@ int main()
             helpButton->triggerClick();
             pump();
             check (! showing (*help, ed), "? again closes it");
+
+            // Escape from a knob: the host may leave focus there. Deliver the key the way a
+            // window does, to the component and then up through its parents until one takes it.
+            auto sendKey = [] (juce::Component* from, const juce::KeyPress& key)
+            {
+                for (auto* c = from; c != nullptr; c = c->getParentComponent())
+                    if (c->keyPressed (key))
+                        return true;
+                return false;
+            };
+            const juce::KeyPress escape (juce::KeyPress::escapeKey);
+            auto* knob = find (ed, "attack");
+            helpButton->triggerClick();
+            pump();
+            const bool taken = knob != nullptr && sendKey (knob, escape);
+            pump();
+            check (taken && ! showing (*help, ed) && ! helpButton->getToggleState(),
+                   "Esc on a knob closes the help page and releases ?");
+            check (knob != nullptr && ! sendKey (knob, escape), "Esc with the help page closed is left for the host");
         }
         else check (false, "view buttons, views and help page found");
     }

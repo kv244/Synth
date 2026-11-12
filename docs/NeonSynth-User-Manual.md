@@ -1,17 +1,21 @@
+<!-- github-cover: shown on GitHub only; the PDF build draws its own full-page cover and drops this block -->
+<p align="center"><img src="images/cover.png" alt="NeonSynth User Manual cover: the four waveforms as neon lines over a grid, with the version and release date" width="420"></p>
+<!-- /github-cover -->
+
 # NeonSynth User Manual
 
 NeonSynth is a learning synthesizer: a place to hear what a waveform sounds like, see what changes when you shape it, and explore the code that makes it happen. Its oscillator, sample, random, and granular engines provide different starting points for that exploration, with source code available to read, build, and modify ([NeonSynth project](https://github.com/kv244/Synth)).
 
-For musicians, begin with one note and one waveform, without stacked oscillator layers obscuring what you are hearing. For coders, follow the same sound into the C++ implementation, from waveform generation through envelope, filter, and output; the interface and the code become two views of the same instrument ([voice architecture](https://github.com/kv244/Synth/blob/v1.6.0/NeonSynthVoice.h)).
+For musicians, begin with one note and one waveform, without stacked oscillator layers obscuring what you are hearing. For coders, follow the same sound into the C++ implementation, from waveform generation through envelope, filter, and output; the interface and the code become two views of the same instrument ([voice architecture](https://github.com/kv244/Synth/blob/v1.7.0/NeonSynthVoice.h)).
 
 **Instrument:** NeonSynth by Razvan Julian Petrescu / AudioDSP  
-**Edition:** 1.3, updated 8 November 2026 (illustrations revised for print; the instrument version is unchanged)<br>
-**Applies to:** NeonSynth v1.6.0, source tag `v1.6.0`  
-**Formats:** VST3 instrument and standalone application; a Windows installer is supplied for this release ([v1.6.0 release](https://github.com/kv244/Synth/releases/tag/v1.6.0)).
+**Edition:** 1.4, updated 12 November 2026 (the new window and its figures; draggable envelope points)<br>
+**Applies to:** NeonSynth v1.7.0, source tag `v1.7.0`  
+**Formats:** VST3 instrument and standalone application; a Windows installer is supplied for this release ([v1.7.0 release](https://github.com/kv244/Synth/releases/tag/v1.7.0)).
 
 ### About this manual
 
-The instructions were checked against the v1.6.0 source code. Every recipe in the sound-design chapter was rendered through the v1.6.0 plugin, to confirm that it sounds, releases cleanly to silence and stays clear of the output soft clipper. This is not a certification of compatibility with every audio device or DAW.
+The instructions were checked against the v1.7.0 source code. Every recipe in the sound-design chapter was rendered through the v1.6.0 plugin, to confirm that it sounds, releases cleanly to silence and stays clear of the output soft clipper; v1.7.0 changes only the window, and its sound is checked to be bit-identical to v1.6.0. This is not a certification of compatibility with every audio device or DAW.
 
 Each figure is labelled by how it was made: **Actual application capture** (a screenshot of the running instrument, with numbered callouts added), **Plot derived from rendered audio** (measured from sound the plugin produced, with the settings stated), or **Explanatory schematic** (a drawing that explains an idea and is not a measurement). How to regenerate them is in [figures/README.md](figures/README.md).
 
@@ -39,7 +43,7 @@ The sound-design settings are starting points, not factory presets. Begin at a l
 
 ### Install the Windows release
 
-Download `NeonSynth-1.6.0-Windows-Setup.exe` from the [v1.6.0 release page](https://github.com/kv244/Synth/releases/tag/v1.6.0). The installer provides the VST3 instrument and an optional standalone application (see [Download](../README.md#download) in the README).
+Download `NeonSynth-1.7.0-Windows-Setup.exe` from the [v1.7.0 release page](https://github.com/kv244/Synth/releases/tag/v1.7.0). The installer provides the VST3 instrument and an optional standalone application (see [Download](../README.md#download) in the README).
 
 | Component | Default location |
 |---|---|
@@ -90,7 +94,7 @@ Use the following setup to minimise distractions. This is an educational compari
 
 1. Turn **RUN** off and select **Source → Oscillator**.
 2. Turn the **FILTER** off, set **WIDTH** to 0%, and leave **GAIN** at 0 dB, with your monitors turned down.
-3. Set **ATK** to approximately 5 ms, **DEC** to 100 ms, **SUS** to 100%, and **REL** to 150 ms.
+3. Set **ATTACK** to approximately 5 ms, **DECAY** to 100 ms, **SUSTAIN** to 100%, and **RELEASE** to 150 ms.
 4. Hold a comfortable mid-range note, such as A4, using a similar playing velocity for each comparison.
 5. Compare **Sine**, **Triangle**, **Square**, and **Sawtooth** without changing the note or envelope.
 6. Repeat the comparison in **SCOPE**, then in **SPECTRUM**.
@@ -101,7 +105,7 @@ Ask yourself: which sounds smoothest, which feels hollow, and which has the most
 
 ![Four rows, one for each of Sine, Triangle, Square and Sawtooth. Each row shows three cycles of the waveform on the left and its harmonic spectrum on the right. The sine has one spectral line; the triangle and square have odd harmonics only, falling away quickly in the triangle; the sawtooth has every harmonic.](images/fig02-waveforms.png)
 
-Figure 2. The four waveforms at A4 (440 Hz). *Plot derived from rendered audio:* each row was rendered through the v1.6.0 plugin at 48 kHz with the settings of the exercise above (ATK 5 ms, DEC 100 ms, SUS 100%, REL 150 ms, filter off, WIDTH 0%, GAIN 0 dB, velocity 100). The waveform is the first 6.8 ms of the steady note; the spectrum is analysed from 1.0 to 1.5 s with a Blackman-Harris window. All rows share the same scales and none is normalised, so heights are directly comparable. Under each row the figure repeats the listening prompt.
+Figure 2. The four waveforms at A4 (440 Hz). *Plot derived from rendered audio:* each row was rendered through the v1.7.0 plugin at 48 kHz with the settings of the exercise above (ATTACK 5 ms, DECAY 100 ms, SUSTAIN 100%, RELEASE 150 ms, filter off, WIDTH 0%, GAIN 0 dB, velocity 100). The waveform is the first 6.8 ms of the steady note; the spectrum is analysed from 1.0 to 1.5 s with a Blackman-Harris window. All rows share the same scales and none is normalised, so heights are directly comparable. Under each row the figure repeats the listening prompt.
 
 ### Listening exercise: hear what a filter removes
 
@@ -117,25 +121,31 @@ Only after those differences become familiar should you add chords, sequencing, 
 
 ## Finding your way around
 
-![The NeonSynth window with eight numbered regions: 1 source and waveform menus, 2 envelope graph and knobs, 3 low-pass filter, 4 voice lights, 5 output scope and level meters, 6 gain and width, 7 the SHAPE strip, 8 the step sequencer.](images/fig01-interface.png)
+![The NeonSynth window with nine numbered regions: 1 source and waveform menus, 2 the strip and its knobs, 3 scope or spectrum, 4 envelope graph and knobs, 5 low-pass filter, 6 output gain, width and meters, 7 voice lights, 8 the help button, 9 the step sequencer.](images/fig01-interface.png)
 
-Figure 1. The main window (v1.6.0, Source set to Oscillator, Sawtooth, with the sequencer running). *Actual application capture; the numbered outlines and the key below the picture were added.* Regions 1–8 are explained in the key, and the window is described control by control in the table below.
+Figure 1. The main window (v1.7.0 at 150%, Source set to Oscillator, Sawtooth, with the sequencer running). *Actual application capture; the numbered outlines and the key below the picture were added.* Regions 1–9 are explained in the key, and the window is described panel by panel in the table below.
 
-The interface groups sound generation and shaping on the left, output monitoring on the right, the sample or shape strip below them, and sequencing along the bottom. Control colours provide additional guidance: cyan for source/output functions, amber for the envelope and sequencer, and magenta for filtering and granular parameters.
+The window has five panels. SOURCE, on the left, is where the sound starts: what plays, and how it is shaped before the envelope. The middle column shows the sound (scope or spectrum) above the envelope and filter. OUTPUT, on the right, sets and measures the level. SEQUENCER runs along the bottom. Colours carry the same meaning everywhere: cyan for the source and output, amber for the envelope and sequencer, and magenta for the filter and the granular controls.
 
-| Area | What you do there |
+| Panel | What you do there |
 |---|---|
-| OSCILLATOR | Select the sound source and, when applicable, its waveform. |
-| ENVELOPE | Set the level shape of each note with ATK, DEC, SUS, and REL. |
-| FILTER | Enable the low-pass filter and adjust its cutoff. |
-| VOICES | See which of the 16 voices are active. |
-| OUTPUT | Choose Scope or Spectrum, watch the meters, and set gain and width. |
-| SAMPLE / SHAPE | Load audio, choose sample-loop behaviour, or shape a granular cloud; with Oscillator or Random, the SHAPE strip chops, folds and adds noise to the wave. |
+| SOURCE | Pick the sound source and waveform. For Sample and Granular, load audio, choose the loop mode, and set the markers on the waveform; for Oscillator and Random, the SHAPE strip and its knobs chop, fold and add noise to the wave. |
+| Display | Switch between SCOPE and SPECTRUM to see the mix. |
+| ENVELOPE | Set the level shape of each note: drag the points on the graph or turn ATTACK, DECAY, SUSTAIN and RELEASE. |
+| FILTER | Switch the low-pass filter in with ON and set its CUTOFF. |
+| OUTPUT | Set GAIN and WIDTH, and watch the left and right meters. |
+| Header | See which of the 16 voices are sounding, and open the quick help with **?**. |
 | SEQUENCER | Start a pattern, edit its steps, and set timing and keyboard interaction. |
 
-Drag the window edge or resize corner to change the interface size; its supported range is 75–200% of the base size, with the aspect ratio preserved.
+### Window size
 
-Click **?** for quick help. Click the overlay or press **Esc** to return to the controls.
+The window is laid out on a 1280 × 860 grid. It opens at full size (100%) when your screen has room for that plus a title bar, and at 75% otherwise. Drag the resize corner at the bottom right to set any size from 75% to 150%. The proportions stay fixed and everything scales together, text included, so nothing moves or hides as the window changes size. The size is not saved with the session: each time the window opens it chooses again.
+
+Labels are at least 12 pixels at 100%, so they stay readable at 75%. On a small laptop screen, 75% is the comfortable size; on a large monitor, 150% makes the step grid and envelope points easier to grab.
+
+### Quick help
+
+Click **?** for a one-page reference over the whole window. Click anywhere on it, press **Esc**, or click **?** again to return to the controls. Esc works from whichever control you touched last; some DAWs keep keystrokes for themselves until you click inside the plugin window, so click it first if Esc does nothing.
 
 ## Choosing a sound source
 
@@ -168,9 +178,9 @@ The engine is selected at note-on, so changing **Source** does not immediately c
 
 With **Source** set to **Oscillator** or **Random**, three stages can reshape the wave before it reaches the envelope: **CHOP** cuts or flips parts of every cycle, **NOISE** blends in white noise, and **FOLD** folds the wave back on itself. All three start neutral, so they change nothing until you turn them up. They do not apply to Sample or Granular.
 
-![The SHAPE strip with a sawtooth: chopped steps shaded amber and cut to silence at OVERTONE 100%, the wave folded at FOLD 100%, and the five sculpting knobs.](images/fig03-shape-strip.png)
+![The SOURCE panel with a sawtooth: in the SHAPE strip every second step is shaded amber and cut to the centre line at OVERTONE 100%, the wave between them is folded at FOLD 100%, and the five sculpting knobs are below.](images/fig03-shape-strip.png)
 
-Figure 3. The SHAPE strip with a sawtooth, OVERTONE 100% and FOLD 100%. *Actual application capture.* The shaded steps are chopped, so the wave is cut to the centre line there; the folded curve between them is the sawtooth after FOLD. The first step has been clicked open.
+Figure 3. The SOURCE panel with the SHAPE strip: a sawtooth, OVERTONE 100% and FOLD 100% (v1.7.0 at 150%). *Actual application capture.* The shaded steps are chopped, so the wave is cut to the centre line there; the folded curve between them is the sawtooth after FOLD. Every second step is chopped, which is the pattern a new instance starts with.
 
 ### The SHAPE strip
 
@@ -230,26 +240,35 @@ Every voice shares one chop pattern; there are no per-voice patterns. Pattern ed
 
 ## Shaping a sound
 
-### Envelope: ATK, DEC, SUS, REL
+### Envelope: ATTACK, DECAY, SUSTAIN, RELEASE
 
 The amplitude envelope sets how each note grows, settles, and fades. Attack, Decay, and Release are times; Sustain is a level, not a duration.
 
 | Control | Meaning | Range | Initial value |
 |---|---|---|---|
-| ATK | Time to rise to the attack peak. | 1 ms–5 s | 10 ms |
-| DEC | Time to move from the peak to the sustain level. | 1 ms–5 s | 100 ms |
-| SUS | Level maintained while the note remains held. | 0–100% | 70% |
-| REL | Fade time after note release. | 1 ms–10 s | 300 ms |
+| ATTACK | Time to rise to the attack peak. | 1 ms–5 s | 10 ms |
+| DECAY | Time to move from the peak to the sustain level. | 1 ms–5 s | 100 ms |
+| SUSTAIN | Level maintained while the note remains held. | 0–100% | 70% |
+| RELEASE | Fade time after note release. | 1 ms–10 s | 300 ms |
 
 The initial values are those of a new instance, not settings inherited from a saved session.
 
 For a pluck, try a short attack, a moderate decay, and low sustain; for a pad, try a slower attack and longer release. If a sample ends first, a long envelope cannot create audio beyond the available sample, unless playback is looped.
 
-The envelope graph shows the shape and the positions of sounding voices. Sustain changes are smoothed, and a note released during Attack or Decay still begins its release from the level it has reached.
+The envelope graph shows the shape and the positions of sounding voices. It is also a control: drag its four points to set the envelope by eye.
+
+| Point | Drag | Sets |
+|---|---|---|
+| A, the peak | left or right | ATTACK: further right is a slower attack |
+| D, the end of the decay | left or right | DECAY |
+| S, the sustain level | up or down | SUSTAIN: the height of the held part |
+| R, the end of the release | left or right | RELEASE |
+
+The value appears in the top-right corner of the graph while you drag. Double-click a point to return it to its initial value. Each drag reaches the DAW as one gesture, like turning the knob, so it records cleanly as automation. Dragging the empty part of the graph does nothing. Sustain changes are smoothed, and a note released during Attack or Decay still begins its release from the level it has reached.
 
 ![Two level-against-time graphs. Top: a note held for 1.2 s rises linearly to a peak in 300 ms, falls to the sustain level of 50% in 300 ms, holds, and falls to zero in 500 ms after the key is released. Bottom: a note released after 150 ms, during the attack, falls from the level it had reached, 50%, to zero in 500 ms.](images/fig04-envelope.png)
 
-Figure 4. The amplitude envelope. *Plot derived from rendered audio:* a sine at A6 was rendered at 48 kHz with ATK 300 ms, DEC 300 ms, SUS 50% and REL 500 ms, and the plot shows the peak level in each 2 ms frame, scaled so that 1 is the attack peak. Both curves are measured, not drawn: the sustain measures 50.1% and the early release starts from 50.0%. The labels and the dotted key-down and key-up lines were added.
+Figure 4. The amplitude envelope. *Plot derived from rendered audio:* a sine at A6 was rendered at 48 kHz with ATTACK 300 ms, DECAY 300 ms, SUSTAIN 50% and RELEASE 500 ms, and the plot shows the peak level in each 2 ms frame, scaled so that 1 is the attack peak. Both curves are measured, not drawn: the sustain measures 50.1% and the early release starts from 50.0%. The labels and the dotted key-down and key-up lines were added.
 
 ### Low-pass filter
 
@@ -263,9 +282,9 @@ Figure 5. What the low-pass filter removes. *Plot derived from rendered audio:* 
 
 ## Sample playback
 
-![The Sample and Granular control strips of the window. Panel a, Source Sample: numbered outlines on the LOAD, PAD and loop menu, the waveform, and the ROOT, START, L.START, L.END and XFADE knobs. Panel b, Source Granular: the same for the waveform with its POS line and SPRAY band, and the ROOT, POS, SCAN, SIZE, DENS, SPRAY and JITTER knobs.](images/fig06-sample-granular-ui.png)
+![The SOURCE panel with Sample and with Granular selected. Panel a, Source Sample: numbered outlines on the LOAD, PAD and loop menu, the waveform, and the ROOT, START, L.START, L.END and XFADE knobs. Panel b, Source Granular: the same for the waveform with its POS line and SPRAY band, and the ROOT, POS, SCAN, SIZE, DENS, SPRAY and JITTER knobs.](images/fig06-sample-granular-ui.png)
 
-Figure 6. The sample strip with **Source** set to **Sample** (a) and to **Granular** (b), with the built-in pad loaded. *Actual application capture; the numbered outlines and keys were added.* The same strip serves both sources, and the knob row changes with the source. Figure 7 draws what these controls do.
+Figure 6. The SOURCE panel with **Source** set to **Sample** (a) and to **Granular** (b), with the built-in pad loaded (v1.7.0 at 150%). *Actual application capture; the numbered outlines and keys were added.* The same strip serves both sources, and the knob row changes with the source. Figure 7 draws what these controls do.
 
 ### Load a recording
 
@@ -371,7 +390,7 @@ The grid supports MIDI notes 0–127 and enabled-step velocities 1–127; the cy
 
 ![The 16-step grid, with numbered pointers to an enabled step, a disabled step, a note name, a velocity bar and the playhead, and a list of the mouse and wheel gestures.](images/fig08-sequencer.png)
 
-Figure 8. The step grid. *Actual application capture; the numbered pointers and the gesture key were added.* The gestures are those in the table above, as coded in the step view: one semitone for every 6 pixels of vertical drag, velocity changes of one for each pixel of Shift-drag or right-drag, and steps of four for Shift with the wheel.
+Figure 8. The step grid (v1.7.0 at 150%, sequencer running). *Actual application capture; the numbered pointers and the gesture key were added.* The gestures are those in the table above, as coded in the step view: one semitone for every 6 pixels of vertical drag, velocity changes of one for each pixel of Shift-drag or right-drag, and steps of four for Shift with the wheel.
 
 To create a new pattern, first switch unwanted steps off, drag the remaining steps to their pitches, and adjust their velocities for accents. There is no separate pattern-bank or pattern-length control in this version.
 
@@ -440,7 +459,7 @@ These are suggested manual settings, not supplied factory presets. Each was rend
 ### Rounded sequencer bass
 
 - **Source:** Oscillator; Waveform: Sawtooth.
-- **Envelope:** ATK 5 ms, DEC 180 ms, SUS 35%, REL 100 ms.
+- **Envelope:** ATTACK 5 ms, DECAY 180 ms, SUSTAIN 35%, RELEASE 100 ms.
 - **Filter:** On; Cutoff approximately 700 Hz.
 - **Output:** WIDTH 0%.
 - **Sequencer:** Layer, 1/16, GATE 40%; start with the default pattern.
@@ -451,7 +470,7 @@ Try raising Cutoff gradually while the pattern runs, then compare Square with Sa
 
 - **Source:** Sample; press PAD and set ROOT to C4.
 - **Loop:** Loop; START 0%, L.START approximately 25%, L.END approximately 75%, XFADE 20 ms.
-- **Envelope:** ATK 800 ms, DEC 600 ms, SUS 75%, REL 2 s.
+- **Envelope:** ATTACK 800 ms, DECAY 600 ms, SUSTAIN 75%, RELEASE 2 s.
 - **Filter:** On; Cutoff approximately 3 kHz.
 - **Output:** WIDTH 70%; RUN off.
 
@@ -461,7 +480,7 @@ Play a chord and hold it long enough to hear the sustain region, then release it
 
 - **Source:** Granular; begin with PAD or a short textured recording.
 - **Cloud:** POS 50%, SCAN 0, SIZE 150 ms, DENS 35/s, SPRAY 10%, JITTER 5 cents.
-- **Envelope:** ATK 500 ms, DEC 300 ms, SUS 80%, REL 2 s.
+- **Envelope:** ATTACK 500 ms, DECAY 300 ms, SUSTAIN 80%, RELEASE 2 s.
 - **Filter:** On; Cutoff approximately 4 kHz.
 
 Hold a note and move POS slowly to explore the recording. Keep SCAN at zero initially so you can hear position changes without automatic movement. A single held note is the quietest of these recipes, about 8 dB below the others; play a chord or raise GAIN if you need more level.
@@ -470,7 +489,7 @@ Hold a note and move POS slowly to explore the recording. Keep SCAN at zero init
 
 - **Source:** Granular; load a recording with contrasting sections.
 - **Cloud:** POS 20%, SCAN +0.20×, SIZE 100 ms, DENS 45/s, SPRAY 25%, JITTER 12 cents.
-- **Envelope:** ATK 300 ms, DEC 500 ms, SUS 70%, REL 1.5 s.
+- **Envelope:** ATTACK 300 ms, DECAY 500 ms, SUSTAIN 70%, RELEASE 1.5 s.
 - **Output:** WIDTH approximately 60%; RUN off.
 
 Try a negative SCAN value to move selection backwards through the recording, then reduce DENS for a more fragmented texture. Reduce the number of held notes if the processing load becomes excessive.
@@ -478,7 +497,7 @@ Try a negative SCAN value to move selection backwards through the recording, the
 ### Evolving random pluck
 
 - **Source:** Random.
-- **Envelope:** ATK 3 ms, DEC 250 ms, SUS 0%, REL 120 ms.
+- **Envelope:** ATTACK 3 ms, DECAY 250 ms, SUSTAIN 0%, RELEASE 120 ms.
 - **Filter:** On; Cutoff approximately 2.5 kHz.
 - **Sequencer:** 1/8 or 1/16; GATE 35%; a few velocity accents.
 
@@ -488,7 +507,7 @@ Let the pattern repeat before deciding how much variation you want. Try opening 
 
 - **Source:** Oscillator; Waveform: Sawtooth.
 - **Shape:** OVERTONE 100%, COMB 2, the default pattern (every second step chopped); NOISE 5%; DRIVE 3, FOLD 50%.
-- **Envelope:** ATK 5 ms, DEC 300 ms, SUS 60%, REL 200 ms.
+- **Envelope:** ATTACK 5 ms, DECAY 300 ms, SUSTAIN 60%, RELEASE 200 ms.
 - **Filter:** On; Cutoff approximately 6 kHz.
 - **Output:** WIDTH 30%.
 
@@ -553,7 +572,7 @@ You do not need to understand the whole application before investigating one par
 |---|---|---|
 | `Oscillator.h` | Waveform generation, phase, band-limiting, and CHOP. | Compare Sine, Triangle, Square, and Sawtooth on the same note. |
 | `Sculpt.h` / `ShapeView.h` | Noise, the oversampled wavefolder, and the SHAPE strip's drawing. | Sweep DRIVE while watching the drawing and the spectrum. |
-| `VoiceEnvelope.h` | Envelope stages and their time/level behaviour. | Move ATK, DEC, SUS, and REL while watching the graph. |
+| `VoiceEnvelope.h` | Envelope stages and their time/level behaviour. | Move ATTACK, DECAY, SUSTAIN, and RELEASE while watching the graph. |
 | `NeonSynthVoice.h` | One note's source, envelope, filter, and panning. | Follow a note from source generation to stereo placement. |
 | `NeonSynthProcessor.cpp` | Parameter ranges/defaults, MIDI routing, output processing, and state. | Match a displayed control to its stored value and playback effect. |
 | `SampleData.h` / `SampleLoader.h` | File preparation, mono conversion, normalisation, and embedded audio. | Compare an imported recording with its prepared sample. |
@@ -567,7 +586,7 @@ It is an editorial guide, not a requirement to read every file in this order.
 
 ### Make a small change, then test it
 
-A useful first experiment is to change a default envelope time in `createParameterLayout()`, rebuild, and open a fresh instance to hear the result. Existing saved sessions can restore their own settings, so they are not a reliable way to check that a new default has taken effect ([parameter definitions and state restoration](https://github.com/kv244/Synth/blob/v1.6.0/NeonSynthProcessor.cpp)).
+A useful first experiment is to change a default envelope time in `createParameterLayout()`, rebuild, and open a fresh instance to hear the result. Existing saved sessions can restore their own settings, so they are not a reliable way to check that a new default has taken effect ([parameter definitions and state restoration](https://github.com/kv244/Synth/blob/v1.7.0/NeonSynthProcessor.cpp)).
 
 For a deeper exercise, inspect why a waveform change waits for a cycle boundary or how grain size and density affect overlap. Make one change at a time, work on a branch, and run the relevant tests before comparing the result with the original; the README's [Unit tests and benchmark](../README.md#unit-tests-and-benchmark) section lists what each test checks.
 
@@ -583,7 +602,7 @@ The project identifies Claude-assisted development, but Claude is not a runtime 
 
 ### Signal path
 
-The voice engine places its amplitude envelope before the low-pass filter and panner; voices are then summed, followed by output gain and soft clipping. This is the implemented path, rather than a generic synthesis diagram ([voice engine](https://github.com/kv244/Synth/blob/v1.6.0/NeonSynthVoice.h), [processor](https://github.com/kv244/Synth/blob/v1.6.0/NeonSynthProcessor.cpp)).
+The voice engine places its amplitude envelope before the low-pass filter and panner; voices are then summed, followed by output gain and soft clipping. This is the implemented path, rather than a generic synthesis diagram ([voice engine](https://github.com/kv244/Synth/blob/v1.7.0/NeonSynthVoice.h), [processor](https://github.com/kv244/Synth/blob/v1.7.0/NeonSynthProcessor.cpp)).
 
 ```text
 MIDI keyboard / DAW notes ─┐
@@ -611,7 +630,7 @@ voice sum → output gain → soft clipper → mono/stereo output and visualiser
 | Random / granular variation | Seeded for reproducible renders from the same reset state and event sequence. |
 | Imported sample audio | Prepared mono audio; original file is not modified. |
 
-These details follow the [voice engine](https://github.com/kv244/Synth/blob/v1.6.0/NeonSynthVoice.h), [processor](https://github.com/kv244/Synth/blob/v1.6.0/NeonSynthProcessor.cpp), [grain engine](https://github.com/kv244/Synth/blob/v1.6.0/GrainCloud.h), and [sample preparation](https://github.com/kv244/Synth/blob/v1.6.0/SampleData.h).
+These details follow the [voice engine](https://github.com/kv244/Synth/blob/v1.7.0/NeonSynthVoice.h), [processor](https://github.com/kv244/Synth/blob/v1.7.0/NeonSynthProcessor.cpp), [grain engine](https://github.com/kv244/Synth/blob/v1.7.0/GrainCloud.h), and [sample preparation](https://github.com/kv244/Synth/blob/v1.7.0/SampleData.h).
 
 ### Optional MIDI diagnostics
 
@@ -639,3 +658,5 @@ Use the repository's build instructions for platform dependencies and optional t
 Record the application version, operating system, standalone/DAW context, audio sample rate and buffer size, selected source, RUN/SYNC/mode settings, and a short sequence of actions that reproduces the issue. For sample problems, include the file format, length, channel count, displayed status message, and whether it fails on first load or after reopening a saved session.
 
 Keep a copy of the project and source sample before experimenting with a workaround. A small reproducible example is more useful than a screenshot of unexplained silence.
+
+<p class="fineprint"><strong>Fine print.</strong> NeonSynth is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General Public License, version 3 (<a href="../LICENSE">LICENSE</a>). The software and this manual are provided “as is”, without warranty of any kind, express or implied, including but not limited to the warranties of merchantability, fitness for a particular purpose and non-infringement. The entire risk as to the quality and performance of the software is with you. In no event shall the author or copyright holders be liable for any claim, damages or other liability, including loss of data, damage to equipment or hearing, or any other loss, arising from the use of or inability to use the software, even if advised of the possibility of such damages. Audio software can produce sudden loud sounds: keep monitoring levels low while experimenting.</p>

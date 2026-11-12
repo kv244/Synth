@@ -404,6 +404,16 @@ public:
         content.setTransform (juce::AffineTransform::scale (scale()));
     }
 
+    /** Escape closes the help overlay from any control. A key goes to the focused component
+        first and then up through its parents to here, so this catches it even when the host
+        left focus on a knob or menu rather than on the overlay. */
+    bool keyPressed (const juce::KeyPress& key) override
+    {
+        if (key == juce::KeyPress::escapeKey && helpOverlay.dismiss())
+            return true;
+        return AudioProcessorEditor::keyPressed (key);
+    }
+
     void paint (juce::Graphics& g) override
     {
         g.fillAll (neon::background);   // the strip around the content when the window is a pixel off the aspect ratio
