@@ -14,6 +14,9 @@
       - step grid: click toggles a step, drag changes its note, wheel nudges it;
       - CHOP strip: click toggles a step, a drag paints the same state across steps;
       - sample view: click sets START, dragging a loop bracket moves it, Granular moves POS;
+      - envelope view: dragging A, D or R sideways changes that time, dragging S up or down
+        sets the level, each in one gesture; a double-click resets a point; a click elsewhere
+        does nothing;
       - SCOPE / SPECTRUM and the help page switch what is shown;
       - every view paints at 75%, 100% and 150% for every source, with and without
         the help page, while notes play.
@@ -28,6 +31,7 @@
     On Linux it needs an X display (in CI: xvfb-run).
 */
 #include "NeonSynthProcessor.h"
+#include "Visualisers.h"
 #include <cstdio>
 #include <cstdlib>
 #include <map>
@@ -460,6 +464,75 @@ int main()
                "Granular: a drag moves POS, in one gesture");
     }
     else check (false, "sample view found");
+
+    //==========================================================================
+    std::printf ("\nEnvelope view: the four points\n");
+    if (auto* adsr = dynamic_cast<AdsrView*> (find (ed, "adsrView")))
+    {
+        struct Point { int handle; const char* id; };
+        for (const auto& point : { Point { AdsrView::attackHandle, "attack" }, Point { AdsrView::decayHandle, "decay" },
+                                   Point { AdsrView::releaseHandle, "release" } })
+        {
+            const float before = valueOf (processor, point.id);
+            auto at = adsr->handlePosition (point.handle);
+            gestures.clear();
+            mouse.down (*adsr, at);
+            mouse.drag (*adsr, at.translated (40.0f, 0.0f));
+            mouse.drag (*adsr, at.translated (80.0f, 0.0f));
+            mouse.up (*adsr, at.translated (80.0f, 0.0f), true);
+            pump();
+            const float longer = valueOf (processor, point.id);
+            check (longer > before && gestures.oneGesture (indexOf (processor, point.id)),
+                   juce::String (point.id) + ": dragging its point right lengthens it (" + juce::String (before, 3) + " -> " + juce::String (longer, 3) + " s), in one gesture");
+
+            at = adsr->handlePosition (point.handle);
+            mouse.down (*adsr, at);
+            mouse.drag (*adsr, at.translated (-50.0f, 0.0f));
+            mouse.up (*adsr, at.translated (-50.0f, 0.0f), true);
+            pump();
+            check (valueOf (processor, point.id) < longer, juce::String (point.id) + ": dragging it left shortens it");
+
+            at = adsr->handlePosition (point.handle);
+            gestures.clear();
+            adsr->mouseDoubleClick (mouse.event (*adsr, at, juce::ModifierKeys::leftButtonModifier, false));
+            pump();
+            auto* param = parameter (processor, point.id);
+            check (std::abs (param->getValue() - param->getDefaultValue()) < 1.0e-6f && gestures.oneGesture (indexOf (processor, point.id)),
+                   juce::String (point.id) + ": a double-click puts it back to its default, in one gesture");
+            set (processor, point.id, before);
+        }
+
+        // Sustain follows the pointer's height: a quarter of the way down the plot is 75%.
+        {
+            const float before = valueOf (processor, "sustain");
+            const auto at = adsr->handlePosition (AdsrView::sustainHandle);
+            const float top = adsr->handlePosition (AdsrView::attackHandle).y, bottom = adsr->handlePosition (AdsrView::releaseHandle).y;
+            const juce::Point<float> target (at.x, top + 0.25f * (bottom - top));
+            gestures.clear();
+            mouse.down (*adsr, at);
+            mouse.drag (*adsr, target);
+            mouse.up (*adsr, target, true);
+            pump();
+            check (std::abs (valueOf (processor, "sustain") - 0.75f) < 0.011f && gestures.oneGesture (indexOf (processor, "sustain")),
+                   "sustain: dragging its point to a quarter of the way down sets " + juce::String (valueOf (processor, "sustain"), 2) + ", in one gesture");
+            set (processor, "sustain", before);
+        }
+
+        // A press away from every point does nothing.
+        {
+            const float a = valueOf (processor, "attack"), d = valueOf (processor, "decay"), s = valueOf (processor, "sustain"), r = valueOf (processor, "release");
+            const auto empty = adsr->handlePosition (AdsrView::releaseHandle).translated (-30.0f, -60.0f);
+            gestures.clear();
+            mouse.down (*adsr, empty);
+            mouse.drag (*adsr, empty.translated (40.0f, 20.0f));
+            mouse.up (*adsr, empty.translated (40.0f, 20.0f), true);
+            pump();
+            check (valueOf (processor, "attack") == a && valueOf (processor, "decay") == d && valueOf (processor, "sustain") == s
+                       && valueOf (processor, "release") == r && gestures.begins.empty(),
+                   "a drag that starts away from the points changes nothing");
+        }
+    }
+    else check (false, "envelope view found");
 
     //==========================================================================
     std::printf ("\nView buttons and help page\n");

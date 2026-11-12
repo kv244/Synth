@@ -129,7 +129,7 @@ private:
         // Right column: the synth and getting sound out.
         addSection (columns[1], { "SOUND", {
             "SOURCE: the oscillator (its Waveform), Random (16 drifting steps), the sample, or Granular: grains of it.",
-            "ENVELOPE: attack, decay, sustain and release of every note.",
+            "ENVELOPE: attack, decay, sustain and release of every note. Drag the points on the shape or turn the knobs; double-click a point to reset it.",
             "FILTER: low-pass cutoff; ON switches it in.",
             "GAIN: output level. WIDTH: stereo spread of the voices.",
             "VOICES lights the 16 voices in use. SCOPE / SPECTRUM switch the display." } }, neon::cyan);
