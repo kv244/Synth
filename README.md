@@ -13,7 +13,12 @@ by **Razvan Julian Petrescu** / **AudioDSP**.
 waveform-listening exercises, the illustrated control guide and a tour of the
 C++ source. Learn the sound as a musician, or explore how it works as a coder.
 
-![NeonSynth v1.6.0 with a sawtooth and the sequencer running](docs/images/captures/ui-oscillator-running.png)
+![NeonSynth v1.7.0 with a sawtooth and the sequencer running](docs/images/captures/ui-oscillator-running.png)
+
+**[If you want to hear it in action](docs/demo/neonsynth-demo.wav)**: a 33-second piece (WAV, 6 MB) in which every
+sound is NeonSynth. Six instances play together: a granular pad, a Random-source bass through CHOP and the
+wavefolder, a chopped sawtooth arpeggio, the built-in step sequencer with swing, noise hats and a looped-sample
+lead. [`docs/demo/make_demo.py`](docs/demo/make_demo.py) renders it from the VST3.
 
 ## Features
 
@@ -25,14 +30,14 @@ C++ source. Learn the sound as a musician, or explore how it works as a coder.
 - **Sample playback** — load a WAV, AIFF or FLAC file (or drop it on the window) and play it across the keyboard: root note, start point, One-shot / Loop / Loop until release with a crossfaded loop, and band-limited copies so high notes don't alias. A built-in pad plays until you load a file, and the sample is saved inside the session
 - **Low-pass Filter** — adjustable cutoff (20 Hz – 20 kHz) with on/off bypass toggle
 - **16-voice Polyphony** — up to 16 simultaneous notes, with click-free voice stealing
-- **ADSR envelope** — linear segments whose durations match the knob values; Sustain changes glide (10 ms) instead of stepping, and a release always takes the Release time, whenever the note is let go
+- **ADSR envelope** — set with the knobs or by dragging the four points on its shape (double-click a point to reset it); linear segments whose durations match the knob values; Sustain changes glide (10 ms) instead of stepping, and a release always takes the Release time, whenever the note is let go
 - **Band-limited oscillators** — 4-point band-limited steps on the square and sawtooth and band-limited corners on the triangle, with the treble roll-off compensated
 - **Output gain** — host-automatable output level (−48 dB to +6 dB)
 - **Headroom protection** — an output soft clipper, untouched below −6 dBFS, keeps even 16 full-velocity voices under −1 dBFS
 - **Stereo width** — voices are panned by pitch (middle C centred, two octaves either side at the edges); 0% is mono, 100% full spread
 - **Visualisers** — triggered oscilloscope locked to the lowest held note, spectrum analyser with the live filter curve, ADSR shape with a dot per sounding voice, 16 voice lights and an L/R output meter with peak hold and clip light
 - **16-step sequencer** — sample-accurate end to end, synced to the host transport or its own tempo, with swing, gate, five step rates and three keyboard modes (Layer / Replace / Transpose); the pattern is saved with the session
-- **Custom neon GUI** — background image, cyan/magenta/amber controls; resizable from 75% to 200%; a **?** button opens quick help
+- **Custom neon GUI** — a 1280 × 860 window of panels with cyan/magenta/amber controls and labels of 12 px or more; it opens at 100% if that fits the screen (otherwise 75%) and resizes from 75% to 150%; a **?** button opens quick help
 - **MIDI** — works with any MIDI controller or keyboard
 - **MIDI Logging** — optional, real-time-safe logging of received MIDI messages to a file (`NEONSYNTH_MIDILOG=<file>`, or `--midilog <file>` in the Standalone)
 - **DAW automation** — all parameters are automatable in VST3 hosts
@@ -139,7 +144,7 @@ the **AudioDSP** manufacturer in your DAW's instrument browser.
 | Sample view | Cyan | The waveform with the start (cyan line), the loop (amber brackets) and a white playhead per sounding voice; drag a marker to move it, click to set the start |
 | ROOT / START / L.START / L.END / XFADE | Cyan | Root key (plays the file at its own pitch), start point, loop start and end, and the loop crossfade (5–50 ms) |
 | ROOT / POS / SCAN / SIZE / DENS / SPRAY / JITTER | Magenta | With Source = Granular the knob row changes: position of the cloud (also draggable on the waveform), scan speed (−2× to +2×, 0 freezes), grain size (5–500 ms), density (1–200 grains/s), spray (how far grains scatter from the position) and pitch jitter (0–100 cents). The waveform then shows the position, the spray band and a tick per sounding grain |
-| ATK / DEC / SUS / REL | Amber | Envelope knobs, with their values shown underneath; the graph above them draws the shape and a dot for every sounding voice |
+| ATTACK / DECAY / SUSTAIN / RELEASE | Amber | Envelope knobs, with their values shown underneath; the graph above them draws the shape and a dot for every sounding voice, and its four points can be dragged (double-click resets one) |
 | Filter ON | Magenta | Toggle button — enables / bypasses the filter (dims the cutoff slider when off) |
 | Cutoff | Magenta | Low-pass filter cutoff frequency (20 Hz – 20 kHz) |
 | Voices | Cyan | One light per voice; brightness follows that voice's envelope |
@@ -147,7 +152,7 @@ the **AudioDSP** manufacturer in your DAW's instrument browser.
 | Meter | Cyan | Left / right output level with peak hold; the red light shows the output soft clipper working near its −1 dBFS ceiling (click the meter to reset) |
 | Gain | Cyan | Output level, −48 dB to +6 dB |
 | Width | Cyan | Stereo spread of voices by pitch, 0–100% |
-| ? | Cyan | Quick help drawn over the window — sequencer editing, modes, controls and no-sound tips. Click anywhere or press Esc to close |
+| ? | Cyan | Quick help drawn over the window — sequencer editing, modes, controls and no-sound tips. Click anywhere or press Esc (from any control) to close |
 
 ---
 
@@ -204,6 +209,8 @@ ctest --test-dir build -C Release --output-on-failure
 | `SampleReaderTests` | Sample playback: pitch tracking (and across sample rates), which band-limited copy each pitch reads, no aliasing at +24 semitones, steady level through crossfaded loops, smooth off-cycle loops, One-shot ends, Loop until release, start offset, the sample reference count (23 checks) |
 | `GranularTests` | The granular source: bit-identical renders from the same seed, grain counts at 5 / 50 / 200 per second, steady level across size and density, pitch, the 32-grain cap, scan speed and freeze, retrigger without cutting grains, stopping, the sample reference |
 | `RealtimeSafetyTests` | Hooks `operator new`/`delete` and fails if `processBlock` allocates or frees while rendering chords, the sequencer, every waveform and every source as another thread keeps replacing the sample |
+| `ParameterLayoutTests` | Every parameter's ID, place, type, range, skew, default and choices against `tests/parameter-layout.txt`: parameters may only be appended (hosts store sessions by ID and normalised value). After appending one, update the reference with `ParameterLayoutTests --write` |
+| `EditorTests` | Opens the editor offscreen and drives it with mouse events: every parameter has a control, each source shows its own controls with nothing overlapping, knobs, boxes and buttons write their parameter in one gesture and follow it, the step grid, the CHOP strip, the sample markers, the four envelope points, the view and help buttons (Esc closes help from any control); then paints every view at 75%, 100% and 150% for every source. Finds controls only by component ID, so it carries over to a new layout. On Linux it needs an X display (`xvfb-run`) |
 | `RenderBenchmark` | Times `processBlock` directly (no host) for idle, one note, 16 voices, 16 voices on each of the Sample, Random and Granular sources, 16 sculpted voices (CHOP, Noise and Fold all on), and a dense sequencer + chords load |
 
 ### Performance
@@ -277,6 +284,18 @@ Parameters: ['source', 'waveform', 'cutoff', 'filter_enabled', 'attack', … ]
   PASS  Log per instance        two instances wrote midi-2.log and midi-4.log
 
 24/24 passed
+```
+
+### Old sessions still sound the same
+
+`tests/compare_versions.py` renders 16 sessions (every source, CHOP, Noise and
+Fold, the sequencer, the clipper) through two builds and requires the audio to
+be identical sample for sample. New parameters start at neutral defaults, so a
+session saved with an earlier release must not change. CI builds the v1.6.0
+release once from its tag, caches it, and compares every pull request with it.
+
+```bash
+python tests/compare_versions.py old/NeonSynth.vst3 build/NeonSynth_artefacts/Release/VST3/NeonSynth.vst3
 ```
 
 ### Render and hear audio
@@ -456,9 +475,12 @@ audio_bright = plugin.process(msgs, 2.5, SR, reset=True)
 | `tests/GranularTests.cpp` | Unit tests for the granular source |
 | `tests/RealtimeSafetyTests.cpp` | Fails if `processBlock` allocates |
 | `tests/RenderBenchmark.cpp` | CPU benchmark of `processBlock` |
+| `tests/ParameterLayoutTests.cpp`, `tests/parameter-layout.txt` | The parameter-layout test and its reference |
+| `tests/EditorTests.cpp` | Offscreen editor tests (gestures and painting) |
+| `tests/compare_versions.py` | Renders a set of sessions through two VST3 builds and requires identical audio (CI compares against the v1.6.0 release) |
 | `Visualisers.h` | Oscilloscope, spectrum analyser, ADSR graph, voice lights and L/R meter (message thread only) |
 | `CMakeLists.txt` | Build config — Standalone + VST3, JUCE path, binary resources |
-| `gui_background.png` | Neon grid background image (embedded as binary data) |
+| `gui_background.png` | Old neon grid background (embedded as binary data; the 1280 x 860 window draws flat panels instead and no longer uses it) |
 | `icon.png` | Application / plugin icon |
 | `test_midi.py` | Automated Python test suite |
 | `log_to_midi.py` | Converts a captured `midi.log` into a Standard MIDI File |
@@ -476,6 +498,79 @@ audio_bright = plugin.process(msgs, 2.5, SR, reset=True)
 | `requirements-test.txt` | Pinned Python dependencies for `test_midi.py` |
 | `installer.nsi` | NSIS installer script (VST3 + Standalone) |
 | `LICENSE` | GNU Affero General Public License v3 |
+
+---
+
+## JUCE or Qt for the GUI
+
+JUCE and Qt are both C++ frameworks that can draw a window, but they are built for different jobs. JUCE is an
+audio framework that includes a GUI; Qt is a general application framework with no audio-plugin support.
+NeonSynth uses JUCE. This section says when each one is the right choice and why NeonSynth chose as it did.
+It compares JUCE 9.0.0, which NeonSynth builds with, and Qt 6.12, the current Qt release in November 2026.
+
+### When JUCE is the right choice
+
+- **Audio plugins** (VST3, AU, AAX, LV2) whose window opens inside a DAW. The host embeds the editor, and JUCE
+  is designed for exactly that.
+- **Standalone audio programs** where the sound engine and the window are one codebase: synths, effects,
+  tuners, small recorders.
+- **Custom-drawn, single-window interfaces**: knobs, meters, scopes, waveforms. JUCE gives a canvas and a few
+  audio-minded controls and expects you to draw the rest.
+- **Controls that must be automatable.** JUCE ties a knob to a plugin parameter, including the begin and end
+  of a drag that a DAW records.
+- **One dependency, one file to ship.** JUCE compiles into the binary; there is nothing else to install.
+
+### When Qt is the right choice
+
+- **General desktop applications** with many standard parts: forms, tables, trees, docking panels, menus,
+  several windows, rich text. Qt's widget set is large and mature; JUCE's is small.
+- **Data-heavy interfaces**: lists and tables backed by models, databases, file browsers.
+- **Designer-led or declarative interfaces.** QML, Qt Designer and Qt Design Studio let a designer build and
+  animate the UI; JUCE's UI is C++ code.
+- **Touch screens and embedded devices**: instrument panels, kiosks, the screen of a hardware unit.
+- **Wide reach**: strong accessibility, translation tooling, right-to-left text and input methods.
+- **Programs where audio is one feature among many.** Qt handles the application, and a separate audio
+  library handles the sound.
+
+### Where they overlap
+
+A standalone audio application can go either way. Large ones with many windows and lists (a DAW, a sample
+librarian) lean to Qt with a separate audio engine; instrument-like ones lean to JUCE. A plugin window in Qt
+is possible but uncommon: Qt expects to own the application object and the event loop, a plugin is a guest in
+the host's process, and the bridge between the two is yours to write and maintain.
+
+### The decision for NeonSynth: JUCE
+
+1. **It is a plugin first.** NeonSynth ships as a VST3 with a Standalone beside it. JUCE provides the plugin
+   format, the audio thread and the window from one codebase, and the window behaves correctly inside a host.
+2. **Every control is a parameter.** Knobs, switches and choices are attached to automatable parameters;
+   `EditorTests` checks that each drag reaches the host as one gesture.
+3. **The interface is drawn by hand.** The scope, spectrum, envelope, sample view and step grid are all custom
+   paint code. Qt's main advantage, its ready-made widgets, would go unused.
+4. **It ships as one file.** JUCE is compiled in, so the installer copies a `.vst3` and an `.exe` and nothing
+   else. Qt would add its libraries next to the plugin, in a folder shared with other plugins.
+5. **The licence matches.** JUCE is available under AGPLv3, which is NeonSynth's own licence.
+
+What this costs: no visual designer, no layout managers beyond FlexBox and Grid (NeonSynth lays everything out
+on a fixed 1280 x 860 grid and scales it), and thinner accessibility than Qt offers. Qt would be the better
+choice for a standalone companion tool built from standard widgets, such as a preset librarian.
+
+### At a glance
+
+| | JUCE 9 GUI | Qt 6 |
+|---|---|---|
+| Made for | Audio plugins and audio programs | General applications, desktop to embedded |
+| Window inside a DAW | Built in | Not designed for it |
+| Automatable parameters | Built in (attachments) | You write the binding |
+| Ready-made widgets | Few, audio-minded | Many, mature |
+| Design tools | None; C++ (or HTML in a WebView) | QML, Qt Designer, Qt Design Studio |
+| Rendering | Own 2D renderer (Direct2D, CoreGraphics, software; OpenGL optional) | Software for Widgets; GPU for Qt Quick |
+| Shipping | Compiled in, one file | Libraries shipped alongside |
+| Licence | AGPLv3 or commercial | LGPLv3 for most modules, GPLv3 for some, or commercial |
+
+Sources: [JUCE 9 announcement](https://forum.juce.com/t/juce-9-is-available-now/69175), JUCE 9.0.0's
+`CHANGE_LIST.md` and `LICENSE.md`, [Qt licensing](https://doc.qt.io/qt-6/licensing.html). Licence terms change;
+check the linked pages before relying on them.
 
 ---
 

@@ -1,22 +1,22 @@
 # Manual figures
 
-The figures in `docs/images/` for [the user manual](../NeonSynth-User-Manual.md), the scripts that make them, and how to remake them. Edition 1.3 of the manual, built against NeonSynth v1.6.0 (source revision `c402e14`); the instrument itself is unchanged.
+The figures in `docs/images/` for [the user manual](../NeonSynth-User-Manual.md), the scripts that make them, and how to remake them. Edition 1.4 of the manual, built against NeonSynth v1.7.0: the new 1280 × 860 window, so the captures (Figures 1, 3, 6 and 8) were retaken, and the plots re-rendered with the window's labels (ATTACK, DECAY, SUSTAIN, RELEASE). The sound is bit-identical to v1.6.0, and every measured value in `render-settings.json` came out the same.
 
 ## What each figure is
 
 | Figure | File | Kind | Made by |
 |---|---|---|---|
-| 1 Main window, eight numbered regions | `fig01-interface` | Actual application capture | `compose_ui.py` |
+| 1 Main window, nine numbered regions | `fig01-interface` | Actual application capture | `compose_ui.py` |
 | 2 The four waveforms and their spectra | `fig02-waveforms` | Plot derived from rendered audio | `render_plots.py` |
-| 3 The SHAPE strip | `fig03-shape-strip` (PNG only) | Actual application capture (v1.6.0, unchanged from edition 1.2) | – |
+| 3 The SOURCE panel with the SHAPE strip | `fig03-shape-strip` | Actual application capture | `compose_ui.py` |
 | 4 Amplitude envelope | `fig04-envelope` | Plot derived from rendered audio | `render_plots.py` |
 | 5 Low-pass filter, before and after | `fig05-filter` | Plot derived from rendered audio | `render_plots.py` |
-| 6 Sample and Granular strips | `fig06-sample-granular-ui` | Actual application capture | `compose_ui.py` |
+| 6 The SOURCE panel for Sample and Granular | `fig06-sample-granular-ui` | Actual application capture | `compose_ui.py` |
 | 7 Where Sample and Granular read | `fig07-sample-granular-schematic` | Explanatory schematic (over the pad's rendered waveform) | `render_plots.py` |
 | 8 Step grid and gestures | `fig08-sequencer` | Actual application capture | `compose_ui.py` |
 | Cover | `cover` | Drawn artwork, with the version and release date | `cover.py --date "<release date>"` (redraw on every version bump; CI checks the version) |
 
-Every figure except 3 is written as an SVG (text as outlines) and a PNG at 300 dpi. All are drawn 160 mm wide, the print text width, with 9 pt labels and 10 pt panel titles in DejaVu Sans. Lines are told apart by style and label as well as by colour, so they read in grayscale. The captions in the manual carry the same kind label.
+Every figure is written as an SVG (text as outlines) and a PNG at 300 dpi. All are drawn 160 mm wide, the print text width, with 9 pt labels and 10 pt panel titles in DejaVu Sans. Lines are told apart by style and label as well as by colour, so they read in grayscale. The captions in the manual carry the same kind label.
 
 ## Remaking them
 
@@ -43,16 +43,15 @@ The renders come from the Linux build of the VST3 at the revision above. The bui
 
 `docs/images/captures/` holds untouched screenshots of the Standalone, and `compose_ui.py` only adds numbered callouts, outlines and the keys. They were taken on Linux under a virtual display:
 
-1. Build the Standalone at the revision above. Start `Xvfb :99 -screen 0 2000x1500x24`, with a PulseAudio null sink so the audio device opens.
-2. Run the Standalone and resize its window to 1536 × 1320 (`xdotool windowsize`). The interface scales with the window, so this is drawn at twice the 768 × 660 default rather than enlarged from a small picture.
-3. Grab the screen with `ffmpeg -f x11grab -draw_mouse 0`, and crop to the window content (x 4–1524, y 30–1282), giving 1520 × 1252 px.
-4. States: `ui-oscillator-running` has Source Oscillator, Sawtooth, defaults otherwise and RUN on (the voices, scope, meters and playhead are live). `ui-sample` and `ui-granular` have the same session with Source set to Sample and to Granular and RUN off.
+1. Build the Standalone at the revision above. Start `Xvfb :99 -screen 0 2400x1600x24`, with a PulseAudio null sink so the audio device opens.
+2. Run the Standalone and size its window to 1924 × 1324 (`xdotool windowsize`). That makes the plugin area exactly 1920 × 1290, the 1280 × 860 design at 150%, the largest size the window allows; it is drawn at that size, not enlarged.
+3. Grab the screen with `ffmpeg -f x11grab -draw_mouse 0`, with the pointer parked off the window, and crop to the plugin area (x 4–1924, y 30–1320).
+4. States, all from a fresh instance: `ui-oscillator-running` has Sawtooth and RUN on (the voices, scope, meters and playhead are live). Then RUN off: `ui-shape` adds OVERTONE 100% and FOLD 100%; `ui-sample` sets Source to Sample with START 45%, L.START 30%, L.END 79%; `ui-granular` sets Source to Granular. Controls were set with the mouse and wheel.
 
-Callout positions in `compose_ui.py` are in pixels of these crops. If the layout of the window changes, retake the captures and move the boxes.
+Boxes in `compose_ui.py` are in design pixels (the coordinates used by `NeonSynthEditor::layout()`) and scaled by 1.5 to the captures. If the layout changes, move the boxes there and retake the captures.
 
 ## Limits
 
 - Small text inside the screenshots (note names, LOAD, PAD) is the instrument's own and is smaller than 9 pt at 160 mm, even though the capture is not enlarged. The callouts, keys and captions are 9 pt or larger.
-- Figure 3 is the edition 1.2 capture, kept as it was.
 - The SVG of a capture embeds the screenshot as a raster, so those files are large.
 - Windows and Linux renders can differ in the last decimal places, which does not change anything visible in these plots.

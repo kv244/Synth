@@ -21,11 +21,17 @@
 
 namespace neon
 {
-    inline const juce::Colour cyan    { 0xff00ffff };
-    inline const juce::Colour magenta { 0xffff00ff };
-    inline const juce::Colour amber   { 0xffffcc00 };
+    inline const juce::Colour cyan    { 0xff19e6ff };
+    inline const juce::Colour magenta { 0xffff4fd8 };
+    inline const juce::Colour amber   { 0xffffb319 };
     inline const juce::Colour red     { 0xffff3355 };
-    inline const juce::Colour panel   { 0xd8050a12 };
+    inline const juce::Colour panel   { 0xff0b0e17 };   // the dark inset behind a view
+
+    inline const juce::Colour background  { 0xff0a0c13 };   // the window
+    inline const juce::Colour section     { 0xff121624 };   // a panel of controls
+    inline const juce::Colour sectionEdge { 0xff232a3d };
+    inline const juce::Colour text        { 0xffe6ebf5 };
+    inline const juce::Colour muted       { 0xffa3adc2 };
 
     inline juce::Font font (float height, bool bold = false)
     {
@@ -36,9 +42,9 @@ namespace neon
     inline void drawPanel (juce::Graphics& g, juce::Rectangle<float> r, juce::Colour edge)
     {
         g.setColour (panel);
-        g.fillRoundedRectangle (r, 4.0f);
+        g.fillRoundedRectangle (r, 6.0f);
         g.setColour (edge.withAlpha (0.35f));
-        g.drawRoundedRectangle (r.reduced (0.5f), 4.0f, 1.0f);
+        g.drawRoundedRectangle (r.reduced (0.5f), 6.0f, 1.0f);
     }
 
     /** Strokes a path with a soft neon glow: two wide faint passes under a thin bright one. */
@@ -220,7 +226,7 @@ public:
         }
         neon::strokeGlow (g, trace, neon::cyan);
 
-        g.setFont (neon::font (10.0f));
+        g.setFont (neon::font (12.0f));
         g.setColour (neon::cyan.withAlpha (0.7f));
         juce::String label ("free run");
         if (lockHz > 0.0f)
@@ -228,7 +234,7 @@ public:
             const int note = juce::roundToInt (12.0f * std::log2 (lockHz / 440.0f)) + 69;
             label = juce::MidiMessage::getMidiNoteName (note, true, true, 4) + "  " + neon::formatHz (lockHz);
         }
-        g.drawText (label, area.removeFromTop (14.0f), juce::Justification::topRight);
+        g.drawText (label, area.removeFromTop (16.0f), juce::Justification::topRight);
     }
 
 private:
@@ -320,10 +326,10 @@ public:
         const auto bounds = getLocalBounds().toFloat();
         neon::drawPanel (g, bounds, neon::cyan);
         auto area = bounds.reduced (8.0f);
-        area.removeFromBottom (12.0f);   // room for frequency labels
+        area.removeFromBottom (16.0f);   // room for frequency labels
 
         // Grid and labels
-        g.setFont (neon::font (9.0f));
+        g.setFont (neon::font (12.0f));
         for (const float f : { 50.0f, 100.0f, 200.0f, 500.0f, 1000.0f, 2000.0f, 5000.0f, 10000.0f })
         {
             if (f >= maxHz()) continue;
@@ -332,7 +338,7 @@ public:
             g.drawVerticalLine (juce::roundToInt (x), area.getY(), area.getBottom());
             g.setColour (neon::cyan.withAlpha (0.5f));
             g.drawText (f < 1000.0f ? juce::String ((int) f) : juce::String ((int) (f / 1000.0f)) + "k",
-                        juce::Rectangle<float> (x - 15.0f, area.getBottom() + 1.0f, 30.0f, 11.0f),
+                        juce::Rectangle<float> (x - 18.0f, area.getBottom() + 1.0f, 36.0f, 14.0f),
                         juce::Justification::centred);
         }
         for (const float db : { -24.0f, -48.0f, -72.0f })
@@ -341,7 +347,7 @@ public:
             g.setColour (neon::cyan.withAlpha (0.08f));
             g.drawHorizontalLine (juce::roundToInt (y), area.getX(), area.getRight());
             g.setColour (neon::cyan.withAlpha (0.4f));
-            g.drawText (juce::String ((int) db), juce::Rectangle<float> (area.getX() + 2.0f, y - 11.0f, 30.0f, 10.0f),
+            g.drawText (juce::String ((int) db), juce::Rectangle<float> (area.getX() + 2.0f, y - 15.0f, 36.0f, 14.0f),
                         juce::Justification::left);
         }
 
@@ -390,10 +396,10 @@ public:
             g.setColour (neon::magenta.withAlpha (0.35f));
             g.drawVerticalLine (juce::roundToInt (x), area.getY(), area.getBottom());
             g.setColour (neon::magenta);
-            g.setFont (neon::font (10.0f));
-            const bool labelLeft = x > area.getRight() - 70.0f;
+            g.setFont (neon::font (12.0f));
+            const bool labelLeft = x > area.getRight() - 80.0f;
             g.drawText (neon::formatHz (fc),
-                        juce::Rectangle<float> (labelLeft ? x - 64.0f : x + 4.0f, area.getY(), 60.0f, 12.0f),
+                        juce::Rectangle<float> (labelLeft ? x - 74.0f : x + 4.0f, area.getY(), 70.0f, 15.0f),
                         labelLeft ? juce::Justification::right : juce::Justification::left);
         }
     }
@@ -508,8 +514,8 @@ public:
         bounds.removeFromTop (4.0f);
 
         // L / R captions
-        auto captions = bounds.removeFromBottom (11.0f);
-        g.setFont (neon::font (9.0f));
+        auto captions = bounds.removeFromBottom (15.0f);
+        g.setFont (neon::font (12.0f));
         g.setColour (neon::cyan.withAlpha (0.6f));
         g.drawText ("L", captions.removeFromLeft (captions.getWidth() * 0.5f), juce::Justification::centred);
         g.drawText ("R", captions, juce::Justification::centred);
@@ -601,10 +607,96 @@ private:
     Segment widths follow the square root of each time so a 10 s release does
     not squash a 10 ms attack into nothing.
 */
-class AdsrView : public juce::Component
+class AdsrView : public juce::Component,
+                 public juce::SettableTooltipClient
 {
 public:
     using VoiceViews = std::array<NeonSynthProcessor::VoiceView, NeonSynthProcessor::numVoices>;
+
+    /** The four points that can be dragged, in the order of attach()'s arguments. */
+    enum Handle { attackHandle = 0, decayHandle, sustainHandle, releaseHandle, numHandles };
+
+    AdsrView()
+    {
+        setTooltip ("Drag the points: A, D and R left or right for the times, S up or down for the level. Double-click a point to reset it.");
+    }
+
+    /** The parameters the points move. Without them the view only displays. */
+    void attach (juce::RangedAudioParameter* attack, juce::RangedAudioParameter* decay,
+                 juce::RangedAudioParameter* sustain, juce::RangedAudioParameter* release)
+    {
+        parameters = { attack, decay, sustain, release };
+    }
+
+    /** Where a point is drawn, in this component's coordinates. */
+    juce::Point<float> handlePosition (int handle) const
+    {
+        const auto area = plotArea();
+        const auto at = [&area] (float x01, float level)
+        {
+            return juce::Point<float> (area.getX() + area.getWidth() * x01, area.getBottom() - area.getHeight() * level);
+        };
+        switch (handle)
+        {
+            case attackHandle:  return at (attackW, 1.0f);
+            case decayHandle:   return at (sustainStart(), sustainLevel);
+            case sustainHandle: return at (0.5f * (sustainStart() + releaseStart()), sustainLevel);
+            default:            return at (1.0f, 0.0f);
+        }
+    }
+
+    void mouseMove (const juce::MouseEvent& e) override   { setHover (handleAt (e.position)); }
+    void mouseExit (const juce::MouseEvent&) override     { if (dragging < 0) setHover (-1); }
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        dragging = handleAt (e.position);
+        if (auto* param = parameterFor (dragging))
+        {
+            setHover (dragging);
+            dragStartValue = param->getValue();
+            param->beginChangeGesture();
+        }
+        else
+        {
+            dragging = -1;
+        }
+    }
+
+    void mouseDrag (const juce::MouseEvent& e) override
+    {
+        auto* param = parameterFor (dragging);
+        if (param == nullptr)
+            return;
+
+        const auto area = plotArea();
+        // S follows the pointer's height. The times move by the distance dragged: the whole width
+        // of the view sweeps a time's whole range (the shape itself is not to scale, see above).
+        const float value = dragging == sustainHandle
+                          ? param->convertTo0to1 (juce::jlimit (0.0f, 1.0f, (area.getBottom() - e.position.y) / area.getHeight()))
+                          : dragStartValue + (e.position.x - e.mouseDownPosition.x) / area.getWidth();
+        param->setValueNotifyingHost (juce::jlimit (0.0f, 1.0f, value));
+        repaint();
+    }
+
+    void mouseUp (const juce::MouseEvent& e) override
+    {
+        if (auto* param = parameterFor (dragging))
+            param->endChangeGesture();
+        dragging = -1;
+        setHover (handleAt (e.position));
+    }
+
+    void mouseDoubleClick (const juce::MouseEvent& e) override
+    {
+        if (auto* param = parameterFor (handleAt (e.position)))
+        {
+            param->beginChangeGesture();
+            param->setValueNotifyingHost (param->getDefaultValue());
+            param->endChangeGesture();
+            repaint();
+        }
+    }
 
     void update (float attack, float decay, float sustain, float release, const VoiceViews& voices)
     {
@@ -656,7 +748,7 @@ public:
     {
         const auto bounds = getLocalBounds().toFloat();
         neon::drawPanel (g, bounds, neon::amber);
-        const auto area = bounds.reduced (8.0f, 6.0f);
+        const auto area = plotArea();
 
         const auto pointAt = [&] (float x01, float level)
         {
@@ -690,10 +782,86 @@ public:
             g.setColour (juce::Colours::white);
             g.fillEllipse (juce::Rectangle<float> (5.0f, 5.0f).withCentre (p));
         }
+
+        // The draggable points: round for the times (left / right), square for the level (up / down).
+        static constexpr const char* letters[numHandles] = { "A", "D", "S", "R" };
+        g.setFont (neon::font (12.0f, true));
+        for (int i = 0; i < numHandles; ++i)
+        {
+            const auto p = handlePosition (i);
+            const bool active = i == hover || i == dragging;
+            const auto box = juce::Rectangle<float> (handleSize, handleSize).withCentre (p);
+            g.setColour (active ? neon::amber : neon::background);
+            if (i == sustainHandle) g.fillRoundedRectangle (box, 2.5f);
+            else                    g.fillEllipse (box);
+            g.setColour (neon::amber);
+            if (i == sustainHandle) g.drawRoundedRectangle (box, 2.5f, 2.0f);
+            else                    g.drawEllipse (box, 2.0f);
+
+            // The letter sits inside the plot: below A, above the others, left of R.
+            const auto letter = juce::Rectangle<float> (16.0f, 14.0f)
+                                    .withCentre (i == attackHandle  ? p.translated (14.0f, 10.0f)
+                                               : i == releaseHandle ? p.translated (-14.0f, -10.0f)
+                                               :                      p.translated (0.0f, p.y - area.getY() > 24.0f ? -15.0f : 15.0f));
+            g.setColour (neon::amber.withAlpha (active ? 1.0f : 0.7f));
+            g.drawText (letters[i], letter, juce::Justification::centred);
+        }
+
+        // While a point is hovered or dragged, say what it is and its value.
+        const int shown = dragging >= 0 ? dragging : hover;
+        if (const auto* param = parameterFor (shown))
+        {
+            static constexpr const char* names[numHandles] = { "ATTACK", "DECAY", "SUSTAIN", "RELEASE" };
+            const float value = param->convertFrom0to1 (param->getValue());
+            g.setColour (neon::amber);
+            g.setFont (neon::font (12.0f));
+            g.drawText (juce::String (names[shown]) + "  " + (shown == sustainHandle ? juce::String (juce::roundToInt (value * 100.0f)) + "%"
+                                                                                      : neon::formatTime (value)),
+                        area.withTrimmedTop (2.0f).withTrimmedRight (4.0f), juce::Justification::topRight);
+        }
     }
 
 private:
     struct Marker { float x = 0.0f, level = 0.0f; };
+
+    static constexpr float handleSize = 13.0f;
+    static constexpr float grabRadius = 14.0f;
+
+    juce::Rectangle<float> plotArea() const   { return getLocalBounds().toFloat().reduced (10.0f, 9.0f); }
+
+    juce::RangedAudioParameter* parameterFor (int handle) const
+    {
+        return handle >= 0 && handle < numHandles ? parameters[(size_t) handle] : nullptr;
+    }
+
+    /** The nearest point within reach of the pointer, or -1. */
+    int handleAt (juce::Point<float> position) const
+    {
+        int nearest = -1;
+        float best = grabRadius;
+        for (int i = 0; i < numHandles; ++i)
+            if (const float d = handlePosition (i).getDistanceFrom (position); d <= best && parameters[(size_t) i] != nullptr)
+            {
+                best = d;
+                nearest = i;
+            }
+        return nearest;
+    }
+
+    void setHover (int handle)
+    {
+        if (std::exchange (hover, handle) != handle)
+        {
+            setMouseCursor (handle < 0 ? juce::MouseCursor::NormalCursor
+                          : handle == sustainHandle ? juce::MouseCursor::UpDownResizeCursor
+                          :                           juce::MouseCursor::LeftRightResizeCursor);
+            repaint();
+        }
+    }
+
+    std::array<juce::RangedAudioParameter*, numHandles> parameters {};
+    int hover = -1, dragging = -1;
+    float dragStartValue = 0.0f;
 
     float sustainStart() const noexcept { return attackW + decayW; }
     float releaseStart() const noexcept { return 1.0f - releaseW; }

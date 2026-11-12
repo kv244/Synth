@@ -93,11 +93,17 @@ code { font-family: 'Liberation Mono', 'DejaVu Sans Mono', monospace; font-size:
 pre { font-size: 9pt; background: #f2f2f2; padding: 2mm; break-inside: avoid; white-space: pre-wrap; }
 hr { border: 0; border-top: 0.4pt solid #888; margin: 5mm 0; }
 .buildinfo { font-size: 8.5pt; color: #444; margin-top: 8mm; }
+.fineprint { font-size: 7.5pt; line-height: 1.35; color: #444; margin-top: 10mm; padding-top: 3mm; border-top: 0.4pt solid #999; text-align: justify; }
+.fineprint + .buildinfo { margin-top: 3mm; }
 """
+
+
+GITHUB_COVER = re.compile(r"<!-- github-cover.*?<!-- /github-cover -->\s*", re.S)
 
 
 def to_html(md, version, sha):
     import markdown
+    md = GITHUB_COVER.sub("", md)          # the cover shown on GitHub; the PDF has its own full page
     built = datetime.date.today().isoformat()
     md = md.rstrip() + (f"\n\n<p class=\"buildinfo\">PDF built {built} from NeonSynth v{version}"
                         f"{f', commit {sha}' if sha else ''}.</p>\n")

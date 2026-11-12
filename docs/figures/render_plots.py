@@ -162,13 +162,13 @@ def fig04(vst, out):
     ax = fig.add_subplot(gs[0])
     kd, ku = p["key_down"], p["key_up"]
     a_end, d_end, r_end = kd + p["attack"], kd + p["attack"] + p["decay"], ku + p["release"]
-    for x0, x1, label in [(kd, a_end, "ATK\n300 ms"), (a_end, d_end, "DEC\n300 ms"), (ku, r_end, "REL\n500 ms")]:
+    for x0, x1, label in [(kd, a_end, "ATTACK\n300 ms"), (a_end, d_end, "DECAY\n300 ms"), (ku, r_end, "RELEASE\n500 ms")]:
         ax.axvspan(x0, x1, color=fs.LIGHT, alpha=0.55, lw=0)
         ax.annotate("", xy=(x0, 1.12), xytext=(x1, 1.12), arrowprops=dict(arrowstyle="<->", lw=0.8, color=fs.INK))
         ax.text((x0 + x1) / 2, 1.16, label, ha="center", va="bottom", fontsize=9)
     ax.plot(t, env, color=fs.INK, lw=1.3, label="Measured envelope")
     ax.axhline(p["sustain"], color=fs.ACCENT, ls=(0, (5, 3)), lw=1.0)
-    ax.text(1.0, p["sustain"] - 0.05, "SUS = 50%: a level, not a time", color=fs.ACCENT, fontsize=8.5, ha="center", va="top")
+    ax.text(0.84, p["sustain"] - 0.05, "SUSTAIN = 50%: a level, not a time", color=fs.ACCENT, fontsize=8.5, ha="center", va="top")
     for x, label, ha, dx in [(kd, "key down", "right", -0.012), (ku, "key up", "left", 0.012)]:
         ax.axvline(x, color=fs.INK, ls=":", lw=0.9)
         ax.text(x + dx, 0.04, label, rotation=90, va="bottom", ha=ha, fontsize=8.5)
@@ -185,7 +185,7 @@ def fig04(vst, out):
     ax2.axvspan(eu, eu + p["release"], color=fs.LIGHT, alpha=0.55, lw=0)
     ax2.annotate("", xy=(eu, 0.62), xytext=(eu + p["release"], 0.62),
                  arrowprops=dict(arrowstyle="<->", lw=0.8, color=fs.INK))
-    ax2.text(eu + 0.03, 0.68, "REL 500 ms, from the level reached", ha="left", va="bottom", fontsize=9)
+    ax2.text(eu + 0.03, 0.68, "RELEASE 500 ms, from the level reached", ha="left", va="bottom", fontsize=9)
     for x, label in [(kd, "key down"), (eu, "key up")]:
         ax2.axvline(x, color=fs.INK, ls=":", lw=0.9)
     ax2.text(eu + 0.012, 0.04, "key up", rotation=90, va="bottom", fontsize=8.5)
@@ -195,8 +195,8 @@ def fig04(vst, out):
     ax2.set_ylabel("Level")
     ax2.set_xlabel("Time (s)")
     ax2.set_title("Released after 150 ms, during the attack", loc="left")
-    fig.suptitle("ATK 300 ms, DEC 300 ms, SUS 50%, REL 500 ms; A6 sine, peak level per 2 ms frame",
-                 x=0.12, ha="left", y=0.985, fontsize=9, fontweight="normal")
+    fig.suptitle("A6 sine; ATTACK 300 ms, DECAY 300 ms, SUSTAIN 50%, RELEASE 500 ms; peak level per 2 ms",
+                 x=0.01, ha="left", y=0.985, fontsize=9, fontweight="normal")
     meas = dict(attack_peak_fs=float(ref), level_at_early_release=float(lvl),
                 sustain_measured=float(np.median(env[(t > d_end + 0.1) & (t < ku - 0.05)])),
                 silent_after_release=bool(env[t > r_end + 0.01].max() < 1e-3))
@@ -252,7 +252,7 @@ def fig05(vst, out):
     ax.legend(loc="lower left", frameon=False)
     ax.set_title("Spectrum: 12 dB per octave above the cutoff", loc="left")
     fig.suptitle(f"Sawtooth A3 ({p['hz']:.0f} Hz), velocity {VELOCITY}; same scales in every panel; not normalised",
-                 x=0.12, ha="left", y=0.985, fontsize=9, fontweight="normal")
+                 x=0.01, ha="left", y=0.985, fontsize=9, fontweight="normal")
     meas = dict(max_deviation_from_butterworth_db_below_10k=float(np.max(np.abs((att - ideal)[harm < 10000]))),
                 attenuation_at_1k_db=float(np.interp(p["cutoff"], harm, att)),
                 attenuation_at_4k_db=float(np.interp(4 * p["cutoff"], harm, att)))

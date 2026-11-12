@@ -14,18 +14,19 @@
 /**
     Neon Synth editor.
 
-    Laid out on a fixed 760 x 520 design grid and scaled uniformly, so the
-    window can be resized (fixed aspect ratio) without any layout logic beyond
-    one scale factor.
+    Laid out once on a fixed 1280 x 860 design grid. Every control lives in one
+    child component ("content") of that size, and the editor scales that component
+    to the window with a single transform (fixed aspect ratio, 75% to 150%), so the
+    layout needs no scale arithmetic and a font size means pixels at 100%. The
+    window opens at 100% if that fits the screen, otherwise at 75%.
 
-    Left column: source and waveform, envelope (shape + knobs), filter, voice lights.
-    Right column: scope / spectrum, stereo meter, output gain and stereo width.
-    Sample strip: the loaded sample (load, built-in pad, loop mode), its
-    waveform with draggable start and loop markers and live playheads, and
-    the root / start / loop / crossfade knobs. A file can also be dropped
-    anywhere on the editor.
-    Bottom strip: the step sequencer - run / sync / tempo / rate / mode on the
-    first row, the 16-step grid, then swing and gate.
+    Header: name, voice lights, help.
+    SOURCE panel: source and waveform, the sample controls (load, built-in pad, loop
+    mode), the strip (sample waveform with draggable markers, or the sculpted
+    cycle) and the knob row under it. A file can also be dropped anywhere.
+    Middle: scope / spectrum, envelope (shape + knobs) and filter.
+    OUTPUT panel: gain, stereo width and the stereo meter.
+    SEQUENCER panel: run / sync / rate / mode / tempo / swing / gate, then the 16 steps.
 
     The "?" button in the top-right corner opens HelpOverlay, a quick-reference
     page drawn over the whole editor.
@@ -42,8 +43,8 @@ public:
     explicit NeonSynthEditor (NeonSynthProcessor& p)
         : AudioProcessorEditor (&p), processor (p), apvts (p.getAPVTS()), sampleView (p, p.getAPVTS()), shapeView (p, p.getAPVTS()), stepGrid (p)
     {
-        backgroundImage = juce::ImageCache::getFromMemory (BinaryData::gui_background_png,
-                                                           BinaryData::gui_background_pngSize);
+        addAndMakeVisible (content);
+        content.onPaint = [this] (juce::Graphics& g) { paintContent (g); };
 
         attackValue  = apvts.getRawParameterValue ("attack");
         decayValue   = apvts.getRawParameterValue ("decay");
@@ -74,7 +75,7 @@ public:
         foldMixValue      = apvts.getRawParameterValue ("foldMix");
 
         // ── Oscillator ───────────────────────────────────────────────────────
-        addAndMakeVisible (waveformCombo);
+        content.addAndMakeVisible (waveformCombo);
         waveformCombo.addItem ("Sine",     1);
         waveformCombo.addItem ("Square",   2);
         waveformCombo.addItem ("Triangle", 3);
@@ -85,7 +86,7 @@ public:
         waveformAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>
             (apvts, "waveform", waveformCombo);
 
-        addAndMakeVisible (sourceCombo);
+        content.addAndMakeVisible (sourceCombo);
         sourceCombo.addItemList ({ "Oscillator", "Sample", "Granular", "Random" }, 1);   // same order as the parameter
         sourceCombo.setTooltip ("What the voices play: the oscillator (Waveform), the loaded sample, grains of it, or Random: a pitched wave of 16 random steps that keeps evolving");
         for (auto id : { juce::ComboBox::outlineColourId, juce::ComboBox::textColourId, juce::ComboBox::arrowColourId })
@@ -93,8 +94,8 @@ public:
         sourceAttachment = std::make_unique<ComboBoxAttachment> (apvts, "source", sourceCombo);
 
         // ── Sample ───────────────────────────────────────────────────────────
-        addAndMakeVisible (sampleView);
-        addChildComponent (shapeView);   // in the sample view's place while Oscillator or Random plays
+        content.addAndMakeVisible (sampleView);
+        content.addChildComponent (shapeView);   // in the sample view's place while Oscillator or Random plays
         setUpReadout (sampleNameLabel, neon::cyan, juce::Justification::centredLeft);
         sampleNameLabel.setInterceptsMouseClicks (true, false);   // so its tooltip (the full path) shows
         setUpReadout (sampleStatusLabel, neon::red, juce::Justification::centredRight);
@@ -104,14 +105,14 @@ public:
             button->setColour (juce::TextButton::buttonColourId,  juce::Colours::transparentBlack);
             button->setColour (juce::TextButton::textColourOffId, neon::cyan);
             button->setColour (juce::ComboBox::outlineColourId,   neon::cyan.withAlpha (0.6f));
-            addAndMakeVisible (button);
+            content.addAndMakeVisible (button);
         }
         loadButton.setTooltip ("Load a WAV, AIFF or FLAC file (or drop one on the synth)");
         padButton.setTooltip ("Go back to the built-in pad");
         loadButton.onClick = [this] { chooseSampleFile(); };
         padButton.onClick  = [this] { processor.useDefaultSample(); };
 
-        addAndMakeVisible (smpLoopCombo);
+        content.addAndMakeVisible (smpLoopCombo);
         smpLoopCombo.addItemList ({ "One-shot", "Loop", "Loop until release" }, 1);   // same order as the parameter
         smpLoopCombo.setTooltip ("One-shot: play to the end.  Loop: loop while the note sounds.  "
                                  "Loop until release: loop while the key is held, then play on to the end.");
@@ -130,7 +131,7 @@ public:
             knob->setColour (juce::Slider::rotarySliderFillColourId,    neon::cyan);
             knob->setColour (juce::Slider::rotarySliderOutlineColourId, neon::cyan.withAlpha (0.3f));
             knob->setColour (juce::Slider::thumbColourId,               neon::cyan);
-            addAndMakeVisible (knob);
+            content.addAndMakeVisible (knob);
             sampleKnobAttachments[i] = std::make_unique<SliderAttachment> (apvts, sampleKnobs[i].second, *knob);
         }
         smpRootKnob.setTooltip ("Root: the key at which the sample plays at its own pitch");
@@ -147,7 +148,7 @@ public:
             knob->setColour (juce::Slider::rotarySliderFillColourId,    neon::magenta);
             knob->setColour (juce::Slider::rotarySliderOutlineColourId, neon::magenta.withAlpha (0.3f));
             knob->setColour (juce::Slider::thumbColourId,               neon::magenta);
-            addChildComponent (knob);
+            content.addChildComponent (knob);
             grainKnobAttachments[i] = std::make_unique<SliderAttachment> (apvts, grainKnobs[i].second, *knob);
         }
         grPosKnob.setTooltip ("Position: where in the sample the cloud sits (or drag the magenta line on the waveform)");
@@ -169,7 +170,7 @@ public:
             knob->setColour (juce::Slider::rotarySliderFillColourId,    neon::cyan);
             knob->setColour (juce::Slider::rotarySliderOutlineColourId, neon::cyan.withAlpha (0.3f));
             knob->setColour (juce::Slider::thumbColourId,               neon::cyan);
-            addChildComponent (knob);
+            content.addChildComponent (knob);
             shapeKnobAttachments[i] = std::make_unique<SliderAttachment> (apvts, shapeKnobs[i].second, *knob);
         }
         chopOvertoneKnob.setTooltip ("Overtone: how far CHOP cuts the shaded steps. 0% leaves them, 100% silences them, 200% turns them upside down");
@@ -202,14 +203,16 @@ public:
                 shapeView.setVisible (mode == StripMode::shape);
                 if (std::exchange (stripMode, mode) != stripMode && getWidth() > 0)
                 {
-                    resized();
-                    repaint();
+                    layoutKnobRow();
+                    content.repaint();
                 }
             });
         sourceListener->sendInitialUpdate();
 
         // ── Envelope ─────────────────────────────────────────────────────────
-        addAndMakeVisible (adsrView);
+        content.addAndMakeVisible (adsrView);
+        adsrView.attach (apvts.getParameter ("attack"), apvts.getParameter ("decay"),
+                         apvts.getParameter ("sustain"), apvts.getParameter ("release"));
 
         for (auto* knob : { &attackKnob, &decayKnob, &sustainKnob, &releaseKnob })
         {
@@ -218,7 +221,7 @@ public:
             knob->setColour (juce::Slider::rotarySliderFillColourId,    neon::amber);
             knob->setColour (juce::Slider::rotarySliderOutlineColourId, neon::amber.withAlpha (0.3f));
             knob->setColour (juce::Slider::thumbColourId,               neon::amber);
-            addAndMakeVisible (knob);
+            content.addAndMakeVisible (knob);
         }
         attackAttachment  = std::make_unique<SliderAttachment> (apvts, "attack",  attackKnob);
         decayAttachment   = std::make_unique<SliderAttachment> (apvts, "decay",   decayKnob);
@@ -233,7 +236,7 @@ public:
         cutoffAttachment = std::make_unique<SliderAttachment> (apvts, "cutoff", cutoffSlider);
         setUpReadout (cutoffReadout, neon::magenta, juce::Justification::centredRight);
 
-        addAndMakeVisible (filterToggle);
+        content.addAndMakeVisible (filterToggle);
         filterToggle.setButtonText ("ON");
         filterToggle.setColour (juce::ToggleButton::textColourId,         neon::magenta);
         filterToggle.setColour (juce::ToggleButton::tickColourId,         neon::magenta);
@@ -248,12 +251,12 @@ public:
         filterEnabledListener->sendInitialUpdate();
 
         // ── Voices ───────────────────────────────────────────────────────────
-        addAndMakeVisible (voiceLeds);
+        content.addAndMakeVisible (voiceLeds);
 
         // ── Output: display, meter, gain, width ──────────────────────────────
-        addChildComponent (oscilloscope);
-        addChildComponent (spectrum);
-        addAndMakeVisible (meter);
+        content.addChildComponent (oscilloscope);
+        content.addChildComponent (spectrum);
+        content.addAndMakeVisible (meter);
 
         for (auto* button : { &scopeButton, &spectrumButton })
         {
@@ -264,7 +267,7 @@ public:
             button->setColour (juce::TextButton::textColourOffId,  neon::cyan.withAlpha (0.55f));
             button->setColour (juce::TextButton::textColourOnId,   neon::cyan);
             button->setColour (juce::ComboBox::outlineColourId,    neon::cyan.withAlpha (0.5f));
-            addAndMakeVisible (button);
+            content.addAndMakeVisible (button);
         }
         scopeButton.setConnectedEdges (juce::Button::ConnectedOnRight);
         spectrumButton.setConnectedEdges (juce::Button::ConnectedOnLeft);
@@ -291,7 +294,7 @@ public:
             toggle->setColour (juce::TextButton::textColourOffId,  neon::amber.withAlpha (0.55f));
             toggle->setColour (juce::TextButton::textColourOnId,   neon::amber);
             toggle->setColour (juce::ComboBox::outlineColourId,    neon::amber.withAlpha (0.6f));
-            addAndMakeVisible (toggle);
+            content.addAndMakeVisible (toggle);
         }
         seqOnButton.setTooltip ("Run the step sequencer");
         seqSyncButton.setTooltip ("Follow the host's tempo and transport when it has one; otherwise use TEMPO");
@@ -307,7 +310,7 @@ public:
             combo->setColour (juce::ComboBox::outlineColourId, neon::amber);
             combo->setColour (juce::ComboBox::textColourId,    neon::amber);
             combo->setColour (juce::ComboBox::arrowColourId,   neon::amber);
-            addAndMakeVisible (combo);
+            content.addAndMakeVisible (combo);
         }
         seqRateCombo.addItemList ({ "1/8", "1/16", "1/32", "1/8T", "1/16T" }, 1);   // same order as the parameter
         seqModeCombo.addItemList ({ "Layer", "Replace", "Transpose" }, 1);
@@ -317,7 +320,7 @@ public:
         seqRateAttachment = std::make_unique<ComboBoxAttachment> (apvts, "seqRate", seqRateCombo);
         seqModeAttachment = std::make_unique<ComboBoxAttachment> (apvts, "seqMode", seqModeCombo);
 
-        addAndMakeVisible (stepGrid);
+        content.addAndMakeVisible (stepGrid);
 
         setUpLinearSlider (seqSwingSlider, neon::amber);
         seqSwingAttachment = std::make_unique<SliderAttachment> (apvts, "seqSwing", seqSwingSlider);
@@ -341,16 +344,45 @@ public:
             else                             helpOverlay.setVisible (false);
         };
         helpOverlay.onClose = [this] { helpButton.setToggleState (false, juce::dontSendNotification); };
-        addAndMakeVisible (helpButton);
-        addChildComponent (helpOverlay);   // added last, so it sits above every control
+        content.addAndMakeVisible (helpButton);
+        content.addChildComponent (helpOverlay);   // added last, so it sits above every control
+
+        // Component IDs: a control attached to a parameter carries that parameter's ID, and the
+        // views and buttons carry the names below. EditorTests finds everything by these IDs
+        // alone, so any layout that keeps them passes the same tests.
+        const std::pair<juce::Component*, const char*> ids[] = {
+            { &waveformCombo, "waveform" }, { &sourceCombo, "source" }, { &smpLoopCombo, "smpLoop" },
+            { &smpRootKnob, "smpRoot" }, { &smpStartKnob, "smpStart" }, { &smpLoopStartKnob, "smpLoopStart" },
+            { &smpLoopEndKnob, "smpLoopEnd" }, { &smpXfadeKnob, "smpXfade" },
+            { &grPosKnob, "grPos" }, { &grScanKnob, "grScan" }, { &grSizeKnob, "grSize" },
+            { &grDensityKnob, "grDensity" }, { &grSprayKnob, "grSpray" }, { &grJitterKnob, "grJitter" },
+            { &chopOvertoneKnob, "chopOvertone" }, { &chopCombKnob, "chopComb" }, { &noiseKnob, "noiseLevel" },
+            { &foldDriveKnob, "foldDrive" }, { &foldMixKnob, "foldMix" },
+            { &attackKnob, "attack" }, { &decayKnob, "decay" }, { &sustainKnob, "sustain" }, { &releaseKnob, "release" },
+            { &cutoffSlider, "cutoff" }, { &filterToggle, "filterEnabled" },
+            { &gainSlider, "gain" }, { &widthSlider, "width" },
+            { &seqOnButton, "seqOn" }, { &seqSyncButton, "seqSync" }, { &seqTempoSlider, "seqTempo" },
+            { &seqRateCombo, "seqRate" }, { &seqModeCombo, "seqMode" }, { &seqSwingSlider, "seqSwing" },
+            { &seqGateSlider, "seqGate" },
+            { &sampleView, "sampleView" }, { &shapeView, "shapeView" }, { &stepGrid, "stepGrid" },
+            { &adsrView, "adsrView" }, { &oscilloscope, "scopeView" }, { &spectrum, "spectrumView" },
+            { &scopeButton, "scopeButton" }, { &spectrumButton, "spectrumButton" },
+            { &loadButton, "loadButton" }, { &padButton, "padButton" },
+            { &helpButton, "helpButton" }, { &helpOverlay, "helpOverlay" } };
+        for (const auto& [component, id] : ids)
+            component->setComponentID (id);
 
         // The chosen view is GUI state, saved with the plugin's state but not automatable.
         setView ((int) apvts.state.getProperty (viewPropertyId, 0));
 
+        layout();
+
+        // 75% to 150%, fixed aspect ratio; opens at the largest of 75% and 100% that fits the screen.
         setResizable (true, true);
-        setResizeLimits (baseWidth * 3 / 4, baseHeight * 3 / 4, baseWidth * 2, baseHeight * 2);
+        setResizeLimits (baseWidth * 3 / 4, baseHeight * 3 / 4, baseWidth * 3 / 2, baseHeight * 3 / 2);
         getConstrainer()->setFixedAspectRatio ((double) baseWidth / (double) baseHeight);
-        setSize (baseWidth, baseHeight);
+        const float openScale = openingScale();
+        setSize (juce::roundToInt ((float) baseWidth * openScale), juce::roundToInt ((float) baseHeight * openScale));
 
         // While the editor was closed the scope FIFO filled up with old audio;
         // throw it away so the first frame shows what is playing now.
@@ -367,162 +399,24 @@ public:
 
     void resized() override
     {
-        const float s = scale();
+        // Everything is laid out in design units inside "content"; the window just scales it.
+        content.setBounds (0, 0, baseWidth, baseHeight);
+        content.setTransform (juce::AffineTransform::scale (scale()));
+    }
 
-        // Pre-render the background at this size so repaints only blit it.
-        scaledBackground = juce::Image (juce::Image::RGB, juce::jmax (1, getWidth()), juce::jmax (1, getHeight()), true);
-        {
-            juce::Graphics bg (scaledBackground);
-            if (backgroundImage.isValid())
-                bg.drawImageWithin (backgroundImage, 0, 0, getWidth(), getHeight(),
-                                    juce::RectanglePlacement::fillDestination);
-            else
-                bg.fillAll (juce::Colours::black);
-        }
-
-        const auto place = [s] (juce::Component& c, float x, float y, float w, float h)
-        {
-            c.setBounds ((juce::Rectangle<float> (x, y, w, h) * s).toNearestInt());
-        };
-
-        // Left column
-        place (sourceCombo,   30, 72, 140, 28);
-        place (waveformCombo, 178, 72, 192, 28);
-        place (adsrView,      30, 130, 340, 64);
-
-        const float knobX[] = { 30, 120, 210, 300 };
-        juce::Slider* knobs[] = { &attackKnob, &decayKnob, &sustainKnob, &releaseKnob };
-        juce::Label*  reads[] = { &attackReadout, &decayReadout, &sustainReadout, &releaseReadout };
-        for (int i = 0; i < 4; ++i)
-        {
-            place (*knobs[i], knobX[i], 198, 70, 48);
-            place (*reads[i], knobX[i], 260, 70, 13);
-        }
-
-        place (cutoffReadout, 150, 281, 150, 18);
-        place (filterToggle,  310, 280, 60, 20);
-        place (cutoffSlider,  30, 302, 340, 28);
-        place (voiceLeds,     30, 362, 340, 18);
-
-        // Right column
-        place (scopeButton,    588, 48, 70, 22);
-        place (spectrumButton, 658, 48, 82, 22);
-        place (oscilloscope,   400, 76, 300, 252);
-        place (spectrum,       400, 76, 300, 252);
-        place (meter,          708, 76, 32, 252);
-        place (gainSlider,     452, 336, 228, 24);
-        place (gainReadout,    680, 340, 60, 16);
-        place (widthSlider,    452, 362, 228, 24);
-        place (widthReadout,   680, 366, 60, 16);
-
-        // Sample strip
-        place (sampleNameLabel,   100, 403, 196, 16);
-        place (loadButton,        300, 400, 58, 22);
-        place (padButton,         362, 400, 58, 22);
-        place (smpLoopCombo,      430, 400, 150, 22);
-        place (sampleStatusLabel, 586, 403, 154, 16);
-        place (sampleView,        30, 428, 390, 62);
-        place (shapeView,         30, 428, 390, 62);
-
-        for (const auto& slot : allKnobSlots())
-        {
-            slot.knob->setVisible (false);
-            slot.readout->setVisible (false);
-        }
-        const auto row = knobRow();
-        for (size_t i = 0; i < row.size(); ++i)
-        {
-            const auto x = (float) rowKnobX ((int) i, (int) row.size());
-            const auto w = (float) knobWidth ((int) row.size());
-            place (*row[i].knob,    x, 426, w, 38);
-            place (*row[i].readout, x, 478, w, 12);
-            row[i].knob->setVisible (true);
-            row[i].readout->setVisible (true);
-        }
-
-        // Sequencer strip
-        place (seqOnButton,     135, 506, 62, 22);
-        place (seqSyncButton,   200, 506, 66, 22);
-        place (seqTempoSlider,  316, 506, 150, 22);
-        place (seqTempoReadout, 466, 509, 84, 16);
-        place (seqRateCombo,    560, 506, 70, 22);
-        place (seqModeCombo,    636, 506, 104, 22);
-        place (stepGrid,        30, 536, 710, 50);
-        place (seqSwingSlider,  80, 592, 230, 22);
-        place (seqSwingReadout, 310, 595, 60, 16);
-        place (seqGateSlider,   446, 592, 234, 22);
-        place (seqGateReadout,  680, 595, 60, 16);
-
-        place (helpButton, 712, 12, 28, 24);
-        helpOverlay.setBounds (getLocalBounds());
-
-        for (auto* label : { &attackReadout, &decayReadout, &sustainReadout, &releaseReadout,
-                             &cutoffReadout, &gainReadout, &widthReadout,
-                             &seqTempoReadout, &seqSwingReadout, &seqGateReadout, &sampleNameLabel, &sampleStatusLabel,
-                             &smpRootReadout, &smpStartReadout, &smpLoopStartReadout, &smpLoopEndReadout, &smpXfadeReadout,
-                             &grPosReadout, &grScanReadout, &grSizeReadout, &grDensityReadout, &grSprayReadout, &grJitterReadout,
-                             &chopOvertoneReadout, &chopCombReadout, &noiseReadout, &foldDriveReadout, &foldMixReadout })
-            label->setFont (neon::font (11.0f * s));
+    /** Escape closes the help overlay from any control. A key goes to the focused component
+        first and then up through its parents to here, so this catches it even when the host
+        left focus on a knob or menu rather than on the overlay. */
+    bool keyPressed (const juce::KeyPress& key) override
+    {
+        if (key == juce::KeyPress::escapeKey && helpOverlay.dismiss())
+            return true;
+        return AudioProcessorEditor::keyPressed (key);
     }
 
     void paint (juce::Graphics& g) override
     {
-        g.drawImageAt (scaledBackground, 0, 0);
-
-        // Static labels are drawn on the 760 x 400 design grid, scaled.
-        g.addTransform (juce::AffineTransform::scale (scale()));
-
-        g.setFont (neon::font (24.0f));
-        g.setColour (juce::Colours::white);
-        g.drawText ("NEON SYNTH", 0, 6, baseWidth, 36, juce::Justification::centred);
-
-        g.setFont (neon::font (13.0f));
-        g.setColour (neon::cyan);
-        g.drawText ("OSCILLATOR", 30, 50, 150, 20, juce::Justification::left);
-        g.drawText ("VOICES",     30, 340, 150, 20, juce::Justification::left);
-        g.drawText ("OUTPUT",     400, 50, 150, 20, juce::Justification::left);
-
-        g.setColour (neon::amber);
-        g.drawText ("ENVELOPE", 30, 108, 150, 20, juce::Justification::left);
-
-        g.setColour (neon::magenta);
-        g.drawText ("FILTER", 30, 280, 150, 20, juce::Justification::left);
-
-        g.setFont (neon::font (11.0f));
-        g.setColour (neon::cyan);
-        g.drawText ("GAIN",  400, 338, 50, 20, juce::Justification::left);
-        g.drawText ("WIDTH", 400, 364, 50, 20, juce::Justification::left);
-
-        // Sample strip
-        g.setColour (neon::cyan.withAlpha (0.25f));
-        g.drawHorizontalLine (394, 30.0f, 740.0f);
-        g.setColour (neon::cyan);
-        g.setFont (neon::font (13.0f));
-        g.drawText (stripMode == StripMode::shape ? "SHAPE" : "SAMPLE", 30, 401, 70, 20, juce::Justification::left);
-        g.setFont (neon::font (11.0f));
-        const auto row = knobRow();
-        for (size_t i = 0; i < row.size(); ++i)
-        {
-            g.setColour (row[i].knob == &smpRootKnob || stripMode != StripMode::granular ? neon::cyan : neon::magenta);
-            g.drawText (row[i].name, rowKnobX ((int) i, (int) row.size()), 465, knobWidth ((int) row.size()), 13, juce::Justification::centred);
-        }
-
-        // Sequencer strip
-        g.setColour (neon::amber.withAlpha (0.25f));
-        g.drawHorizontalLine (500, 30.0f, 740.0f);
-        g.setColour (neon::amber);
-        g.setFont (neon::font (13.0f));
-        g.drawText ("SEQUENCER", 30, 507, 100, 20, juce::Justification::left);
-        g.setFont (neon::font (11.0f));
-        g.drawText ("TEMPO", 272, 507, 44, 20, juce::Justification::left);
-        g.drawText ("SWING", 30,  593, 50, 20, juce::Justification::left);
-        g.drawText ("GATE",  400, 593, 46, 20, juce::Justification::left);
-
-        g.setColour (neon::amber);
-        const char* names[] = { "ATK", "DEC", "SUS", "REL" };
-        const int   knobX[] = { 30, 120, 210, 300 };
-        for (int i = 0; i < 4; ++i)
-            g.drawText (names[i], knobX[i], 247, 70, 13, juce::Justification::centred);
+        g.fillAll (neon::background);   // the strip around the content when the window is a pixel off the aspect ratio
     }
 
 private:
@@ -530,12 +424,25 @@ private:
     using ButtonAttachment   = juce::AudioProcessorValueTreeState::ButtonAttachment;
     using ComboBoxAttachment = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
 
-    static constexpr int baseWidth  = 760;
-    static constexpr int baseHeight = 626;
+    static constexpr int baseWidth  = 1280;
+    static constexpr int baseHeight = 860;
     static constexpr int timerHz    = 30;
     static inline const juce::Identifier viewPropertyId { "view" };
 
     float scale() const noexcept { return (float) getWidth() / (float) baseWidth; }
+
+    /** 100% if the window (and a title bar's worth) fits the main screen's usable area, otherwise 75%. */
+    static float openingScale()
+    {
+        constexpr int titleBar = 48;
+        if (const auto* display = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay())
+        {
+            const auto area = display->userArea;
+            if (area.getWidth() < baseWidth || area.getHeight() < baseHeight + titleBar)
+                return 0.75f;
+        }
+        return 1.0f;
+    }
 
     // The knob row of the sample strip: Sample's five knobs, Granular's seven (sharing ROOT),
     // or the five sculpting knobs while Oscillator or Random plays.
@@ -573,10 +480,181 @@ private:
         return all;
     }
 
-    /** 5 knobs at 62 apart, or 7 at 44 apart, from x = 430 to 740. */
-    static int knobSpacing (int count) noexcept   { return count > 5 ? 44 : 62; }
-    static int knobWidth (int count) noexcept     { return knobSpacing (count) - 4; }
-    static int rowKnobX (int i, int count) noexcept { return 430 + knobSpacing (count) * i; }
+    /** The knob row spans the SOURCE panel's inner width (x = 32 to 400), shared out evenly. */
+    static juce::Range<int> rowKnobSpan (int i, int count) noexcept
+    {
+        const auto edge = [count] (int k) { return 32 + juce::roundToInt (368.0f * (float) k / (float) count); };
+        return { edge (i), edge (i + 1) };
+    }
+
+    /** A panel, as the design draws it: dark fill, thin edge, rounded. */
+    static void drawSection (juce::Graphics& g, juce::Rectangle<int> r)
+    {
+        g.setColour (neon::section);
+        g.fillRoundedRectangle (r.toFloat(), 10.0f);
+        g.setColour (neon::sectionEdge);
+        g.drawRoundedRectangle (r.toFloat().reduced (0.5f), 10.0f, 1.0f);
+    }
+
+    void layoutKnobRow()
+    {
+        for (const auto& slot : allKnobSlots())
+        {
+            slot.knob->setVisible (false);
+            slot.readout->setVisible (false);
+        }
+        const auto row = knobRow();
+        for (size_t i = 0; i < row.size(); ++i)
+        {
+            const auto span = rowKnobSpan ((int) i, (int) row.size());
+            row[i].knob->setBounds (span.getStart(), 516, span.getLength(), 52);
+            row[i].readout->setBounds (span.getStart(), 588, span.getLength(), 14);
+            row[i].knob->setVisible (true);
+            row[i].readout->setVisible (true);
+        }
+    }
+
+    /** Puts every control in its place on the 1280 x 860 grid (the knob row is placed by layoutKnobRow()). */
+    void layout()
+    {
+        // Header
+        voiceLeds.setBounds (880, 33, 288, 18);
+        helpButton.setBounds (1212, 26, 40, 32);
+
+        // SOURCE panel (16, 82, 400 x 548)
+        sourceCombo.setBounds (32, 118, 176, 32);
+        waveformCombo.setBounds (216, 118, 184, 32);
+        loadButton.setBounds (32, 160, 64, 28);
+        padButton.setBounds (102, 160, 56, 28);
+        smpLoopCombo.setBounds (166, 160, 234, 28);
+        sampleNameLabel.setBounds (32, 194, 258, 18);
+        sampleStatusLabel.setBounds (294, 194, 106, 18);
+        sampleView.setBounds (32, 218, 368, 290);
+        shapeView.setBounds (32, 218, 368, 290);
+        layoutKnobRow();
+
+        // Middle: view (428, 82, 524 x 262), then envelope (428, 356, 330 x 274) and filter (770, 356, 182 x 274)
+        scopeButton.setBounds (444, 92, 92, 28);
+        spectrumButton.setBounds (536, 92, 110, 28);
+        oscilloscope.setBounds (444, 128, 492, 204);
+        spectrum.setBounds (444, 128, 492, 204);
+
+        adsrView.setBounds (444, 392, 298, 116);
+        juce::Slider* knobs[] = { &attackKnob, &decayKnob, &sustainKnob, &releaseKnob };
+        juce::Label*  reads[] = { &attackReadout, &decayReadout, &sustainReadout, &releaseReadout };
+        for (int i = 0; i < 4; ++i)
+        {
+            knobs[i]->setBounds (444 + 75 * i, 516, 70, 52);
+            reads[i]->setBounds (444 + 75 * i, 588, 70, 14);
+        }
+
+        filterToggle.setBounds (872, 362, 64, 26);
+        cutoffReadout.setBounds (856, 400, 80, 18);
+        cutoffSlider.setBounds (786, 424, 150, 28);
+
+        // OUTPUT panel (964, 82, 300 x 548)
+        gainSlider.setBounds (1030, 126, 150, 28);
+        gainReadout.setBounds (1184, 132, 64, 16);
+        widthSlider.setBounds (1030, 160, 150, 28);
+        widthReadout.setBounds (1184, 166, 64, 16);
+        meter.setBounds (1040, 214, 160, 396);
+
+        // SEQUENCER panel (16, 642, 1248 x 204)
+        seqOnButton.setBounds (150, 652, 72, 28);
+        seqSyncButton.setBounds (228, 652, 72, 28);
+        seqRateCombo.setBounds (308, 652, 80, 28);
+        seqModeCombo.setBounds (396, 652, 124, 28);
+        seqTempoSlider.setBounds (602, 652, 116, 28);
+        seqTempoReadout.setBounds (722, 656, 92, 20);
+        seqSwingSlider.setBounds (884, 652, 100, 28);
+        seqSwingReadout.setBounds (988, 656, 48, 20);
+        seqGateSlider.setBounds (1100, 652, 92, 28);
+        seqGateReadout.setBounds (1196, 656, 52, 20);
+        stepGrid.setBounds (32, 692, 1216, 142);
+
+        helpOverlay.setBounds (0, 0, baseWidth, baseHeight);
+
+        // Every readout is 12 px or more at 100%.
+        for (auto* label : { &attackReadout, &decayReadout, &sustainReadout, &releaseReadout,
+                             &cutoffReadout, &gainReadout, &widthReadout,
+                             &seqTempoReadout, &seqSwingReadout, &seqGateReadout, &sampleNameLabel, &sampleStatusLabel,
+                             &smpRootReadout, &smpStartReadout, &smpLoopStartReadout, &smpLoopEndReadout, &smpXfadeReadout,
+                             &grPosReadout, &grScanReadout, &grSizeReadout, &grDensityReadout, &grSprayReadout, &grJitterReadout,
+                             &chopOvertoneReadout, &chopCombReadout, &noiseReadout, &foldDriveReadout, &foldMixReadout })
+            label->setFont (neon::font (12.0f));
+    }
+
+    /** The panels and the static labels, drawn on the design grid (under the controls). */
+    void paintContent (juce::Graphics& g)
+    {
+        g.fillAll (neon::background);
+        for (const auto r : { juce::Rectangle<int> (16, 14, 1248, 56),    // header
+                              juce::Rectangle<int> (16, 82, 400, 548),    // source
+                              juce::Rectangle<int> (428, 82, 524, 262),   // view
+                              juce::Rectangle<int> (428, 356, 330, 274),  // envelope
+                              juce::Rectangle<int> (770, 356, 182, 274),  // filter
+                              juce::Rectangle<int> (964, 82, 300, 548),   // output
+                              juce::Rectangle<int> (16, 642, 1248, 204) }) // sequencer
+            drawSection (g, r);
+
+        // Header
+        juce::AttributedString name;
+        name.append ("NEON ", neon::font (22.0f, true), neon::text);
+        name.append ("SYNTH", neon::font (22.0f, true), neon::cyan);
+        name.draw (g, juce::Rectangle<float> (32.0f, 29.0f, 300.0f, 28.0f));
+        g.setColour (neon::muted);
+        g.setFont (neon::font (12.0f, true));
+        g.drawText ("VOICES", 810, 33, 64, 18, juce::Justification::centredRight);
+
+        const auto title = [&g] (const char* text, juce::Colour colour, int x, int y, int w = 150)
+        {
+            g.setColour (colour);
+            g.setFont (neon::font (13.0f, true));
+            g.drawText (text, x, y, w, 18, juce::Justification::left);
+        };
+        const auto label = [&g] (const char* text, juce::Colour colour, int x, int y, int w, int h, juce::Justification j = juce::Justification::left)
+        {
+            g.setColour (colour);
+            g.setFont (neon::font (12.0f, true));
+            g.drawText (text, x, y, w, h, j);
+        };
+
+        // SOURCE: the title, what the strip below shows, and the names of the knobs under it
+        title ("SOURCE", neon::cyan, 32, 92);
+        g.setColour (neon::muted);
+        g.setFont (neon::font (12.0f));
+        g.drawText (stripMode == StripMode::shape ? "SHAPE - one cycle" : stripMode == StripMode::sample ? "SAMPLE - drag the markers" : "GRAINS - drag POS",
+                    152, 92, 248, 18, juce::Justification::right);
+        const auto row = knobRow();
+        for (size_t i = 0; i < row.size(); ++i)
+        {
+            const auto span = rowKnobSpan ((int) i, (int) row.size());
+            label (row[i].name, row[i].knob == &smpRootKnob || stripMode != StripMode::granular ? neon::cyan : neon::magenta,
+                   span.getStart(), 572, span.getLength(), 14, juce::Justification::centred);
+        }
+
+        // Envelope
+        title ("ENVELOPE", neon::amber, 444, 366);
+        const char* names[] = { "ATTACK", "DECAY", "SUSTAIN", "RELEASE" };
+        for (int i = 0; i < 4; ++i)
+            label (names[i], neon::amber, 444 + 75 * i, 572, 70, 14, juce::Justification::centred);
+
+        // Filter
+        title ("FILTER", neon::magenta, 786, 366, 80);
+        label ("CUTOFF", neon::magenta, 786, 402, 66, 16);
+
+        // Output
+        title ("OUTPUT", neon::cyan, 980, 92);
+        label ("GAIN",  neon::cyan, 980, 132, 48, 16);
+        label ("WIDTH", neon::cyan, 980, 166, 48, 16);
+
+        // Sequencer
+        title ("SEQUENCER", neon::amber, 32, 657, 110);
+        label ("TEMPO", neon::amber, 544, 656, 56, 20);
+        label ("SWING", neon::amber, 830, 656, 52, 20);
+        label ("GATE",  neon::amber, 1056, 656, 42, 20);
+    }
+
 
     /** name + details, with the name shortened ("...") so the details always fit the label. */
     juce::String fitSampleName (const juce::String& name, const juce::String& details) const
@@ -649,7 +727,7 @@ private:
         slider.setColour (juce::Slider::thumbColourId,      colour);
         slider.setColour (juce::Slider::trackColourId,      colour.withAlpha (0.3f));
         slider.setColour (juce::Slider::backgroundColourId, juce::Colours::black);
-        addAndMakeVisible (slider);
+        content.addAndMakeVisible (slider);
     }
 
     void setUpReadout (juce::Label& label, juce::Colour colour, juce::Justification justification)
@@ -658,7 +736,7 @@ private:
         label.setJustificationType (justification);
         label.setInterceptsMouseClicks (false, false);
         label.setBorderSize ({});
-        addAndMakeVisible (label);
+        content.addAndMakeVisible (label);
     }
 
     void updateFilterState (bool on)
@@ -770,9 +848,16 @@ private:
         updateReadouts();
     }
 
+    /** Everything the editor shows lives here, at the design size; resized() scales it to the window. */
+    struct Content : juce::Component
+    {
+        std::function<void (juce::Graphics&)> onPaint;
+        void paint (juce::Graphics& g) override { if (onPaint) onPaint (g); }
+    };
+
     NeonSynthProcessor&           processor;
     juce::AudioProcessorValueTreeState& apvts;
-    juce::Image backgroundImage, scaledBackground;
+    Content content;   // declared before every control, so it outlives them
 
     std::atomic<float>* attackValue = nullptr;
     std::atomic<float>* decayValue = nullptr;
@@ -860,7 +945,7 @@ private:
 
     // Help
     juce::TextButton helpButton { "?" };
-    HelpOverlay      helpOverlay { baseWidth };
+    HelpOverlay      helpOverlay { baseWidth, baseHeight };
 
     std::unique_ptr<juce::ParameterAttachment> sourceListener;
     std::unique_ptr<juce::ParameterAttachment> filterEnabledListener;   // last: destroyed first

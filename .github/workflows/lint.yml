@@ -2,9 +2,9 @@ name: Lint
 
 on:
   push:
-    branches: [master, main, oscillators]
+    branches: [master, main, 'v[0-9]*']
   pull_request:
-    branches: [master, main, oscillators]
+    branches: [master, main, 'v[0-9]*']
 
 permissions:
   contents: read
