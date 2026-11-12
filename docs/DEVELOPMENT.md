@@ -335,6 +335,7 @@ audio_bright = plugin.process(msgs, 2.5, SR, reset=True)
 | `tests/RenderBenchmark.cpp` | CPU benchmark of `processBlock` |
 | `tests/ParameterLayoutTests.cpp`, `tests/parameter-layout.txt` | The parameter-layout test and its reference |
 | `tests/EditorTests.cpp` | Offscreen editor tests (gestures and painting) |
+| `tests/complexity_report.py` | Lines of code and the cyclomatic complexity of every plugin function, as Markdown (`pip install lizard`); CI runs it on every push and pull request |
 | `tests/compare_versions.py` | Renders a set of sessions through two VST3 builds and requires identical audio (CI compares against the v1.6.0 release) |
 | `Visualisers.h` | Oscilloscope, spectrum analyser, ADSR graph, voice lights and L/R meter (message thread only) |
 | `CMakeLists.txt` | Build config — Standalone + VST3, JUCE path, the test programs |
@@ -351,7 +352,7 @@ audio_bright = plugin.process(msgs, 2.5, SR, reset=True)
 | `pyproject.toml` | Ruff lint configuration |
 | `.github/workflows/test.yml` | CI on every PR — Windows build, unit tests, Python suite, the comparison with the reference release, pluginval (strictness 10, as at release), CPU benchmark |
 | `.github/workflows/build.yml` | CI — CMake build and unit tests on Ubuntu (GCC) |
-| `.github/workflows/lint.yml` | CI — ruff lint of every Python file |
+| `.github/workflows/lint.yml` | CI — ruff lint of every Python file, and the code statistics report (lines of code, cyclomatic complexity per function) on the run's Summary page |
 | `.github/workflows/manual.yml` | CI — checks the manual against the version and builds its PDF |
 | `.github/workflows/release.yml` | Release on a version tag — manual check, all tests, pluginval (strictness 10), installer, GitHub Release with the manual PDF |
 | `requirements-test.txt` | Pinned Python dependencies for `test_midi.py` |

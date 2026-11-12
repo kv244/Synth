@@ -25,3 +25,24 @@ jobs:
 
       - name: Lint every Python file (test suite, tools, manual and figure scripts)
         run: ruff check .
+
+  # Lines of code and the cyclomatic complexity of every function in the plugin, shown on
+  # this run's summary page. A report, not a gate: it never fails the run on a number.
+  statistics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262   # v4.4.0
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: '3.14'
+
+      - name: Install lizard
+        run: pip install lizard==1.26.0
+
+      - name: Code statistics (see the run's Summary)
+        run: |
+          python tests/complexity_report.py | tee report.md
+          cat report.md >> "$GITHUB_STEP_SUMMARY"
