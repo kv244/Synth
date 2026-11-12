@@ -496,6 +496,37 @@ audio_bright = plugin.process(msgs, 2.5, SR, reset=True)
 
 ---
 
+## JUCE 9's GUI compared with Qt
+
+NeonSynth's window is drawn with JUCE's own GUI module (`juce_gui_basics`), not Qt. JUCE fits because the
+window has to open inside a DAW's window and drive automatable parameters; Qt is the stronger toolkit for a
+general desktop application. The table compares JUCE 9.0.0, which NeonSynth builds with, and Qt 6.12, the
+current Qt release in November 2026.
+
+| | JUCE 9 GUI | Qt 6 |
+|---|---|---|
+| What it is | The GUI part of an audio framework. The same library provides the plugin formats (VST3 here), audio and MIDI devices and DSP | A general application framework with two GUI stacks: Qt Widgets (C++) and Qt Quick (QML). No plugin-format support |
+| A window inside a DAW | Built in. The host embeds `AudioProcessorEditor`; this is the case JUCE is designed for | Not designed for it. Qt expects to own the application object and the event loop, and a plugin is a guest in the host's process. It can be done, but the bridge is yours to write and maintain |
+| Parameters | Attachments tie a slider, button or combo box to an automatable parameter, including the begin/end gestures hosts record (`EditorTests` checks these) | No audio-parameter concept; you write the binding |
+| Ready-made widgets | A small set aimed at audio (sliders, rotary knobs, combo boxes, buttons). Most of the look is drawn by hand: every view in NeonSynth is custom paint code | A large, mature set: tables, trees, docking, rich text, native dialogs, model/view |
+| Layout | `setBounds`, plus FlexBox and Grid. NeonSynth lays everything out once on a 1280 x 860 grid and scales it with one transform | Layout managers in Widgets; anchors and layouts in QML |
+| Declarative UI and design tools | None; the UI is C++ (or HTML in a WebView, since JUCE 8) | QML, Qt Designer, Qt Design Studio |
+| Rendering | Its own 2D renderer: Direct2D on Windows, CoreGraphics on macOS, software elsewhere, OpenGL optional. JUCE 9 speeds up the software renderer and adds a new SVG parser and variable fonts | Widgets paint in software; Qt Quick renders on the GPU through Direct3D, Metal, Vulkan or OpenGL |
+| Accessibility and languages | Screen-reader support for the standard widgets; simple translation files | Deeper: accessibility, translation tooling, right-to-left text, input methods |
+| Shipping | Compiled into the plugin: one file, nothing else to install | Shared libraries and platform plugins ship alongside; linking Qt statically has licence consequences |
+| Headless GUI tests | The editor opens offscreen and takes synthetic mouse events (how `EditorTests` works) | Qt Test, with an offscreen platform |
+| Licence | AGPLv3 or the commercial JUCE licence; terms unchanged from JUCE 8. NeonSynth uses AGPLv3 | LGPLv3 for most modules, GPLv3 for some (Qt Graphs, Qt Quick 3D and Qt Quick Timeline among them), or commercial |
+
+For NeonSynth the choice is JUCE: one dependency covers the plugin format, the audio thread and the window,
+and the window behaves correctly inside a host. Qt would be the better choice for a standalone-only tool with
+many standard widgets, such as a preset librarian or a sample editor.
+
+Sources: [JUCE 9 announcement](https://forum.juce.com/t/juce-9-is-available-now/69175), JUCE 9.0.0's
+`CHANGE_LIST.md` and `LICENSE.md`, [Qt licensing](https://doc.qt.io/qt-6/licensing.html). Licence terms change;
+check the linked pages before relying on them.
+
+---
+
 ## License
 
 Copyright (C) 2026 Razvan Julian Petrescu. Portions assisted by Claude (Anthropic).
