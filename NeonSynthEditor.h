@@ -211,6 +211,8 @@ public:
 
         // ── Envelope ─────────────────────────────────────────────────────────
         content.addAndMakeVisible (adsrView);
+        adsrView.attach (apvts.getParameter ("attack"), apvts.getParameter ("decay"),
+                         apvts.getParameter ("sustain"), apvts.getParameter ("release"));
 
         for (auto* knob : { &attackKnob, &decayKnob, &sustainKnob, &releaseKnob })
         {

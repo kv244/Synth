@@ -15,6 +15,11 @@ C++ source. Learn the sound as a musician, or explore how it works as a coder.
 
 ![NeonSynth v1.6.0 with a sawtooth and the sequencer running](docs/images/captures/ui-oscillator-running.png)
 
+**[If you want to hear it in action](docs/demo/neonsynth-demo.wav)**: a 33-second piece (WAV, 6 MB) in which every
+sound is NeonSynth. Six instances play together: a granular pad, a Random-source bass through CHOP and the
+wavefolder, a chopped sawtooth arpeggio, the built-in step sequencer with swing, noise hats and a looped-sample
+lead. [`docs/demo/make_demo.py`](docs/demo/make_demo.py) renders it from the VST3.
+
 ## Features
 
 - **4 Waveforms** — Sine, Square, Triangle, Sawtooth
@@ -25,14 +30,14 @@ C++ source. Learn the sound as a musician, or explore how it works as a coder.
 - **Sample playback** — load a WAV, AIFF or FLAC file (or drop it on the window) and play it across the keyboard: root note, start point, One-shot / Loop / Loop until release with a crossfaded loop, and band-limited copies so high notes don't alias. A built-in pad plays until you load a file, and the sample is saved inside the session
 - **Low-pass Filter** — adjustable cutoff (20 Hz – 20 kHz) with on/off bypass toggle
 - **16-voice Polyphony** — up to 16 simultaneous notes, with click-free voice stealing
-- **ADSR envelope** — linear segments whose durations match the knob values; Sustain changes glide (10 ms) instead of stepping, and a release always takes the Release time, whenever the note is let go
+- **ADSR envelope** — set with the knobs or by dragging the four points on its shape (double-click a point to reset it); linear segments whose durations match the knob values; Sustain changes glide (10 ms) instead of stepping, and a release always takes the Release time, whenever the note is let go
 - **Band-limited oscillators** — 4-point band-limited steps on the square and sawtooth and band-limited corners on the triangle, with the treble roll-off compensated
 - **Output gain** — host-automatable output level (−48 dB to +6 dB)
 - **Headroom protection** — an output soft clipper, untouched below −6 dBFS, keeps even 16 full-velocity voices under −1 dBFS
 - **Stereo width** — voices are panned by pitch (middle C centred, two octaves either side at the edges); 0% is mono, 100% full spread
 - **Visualisers** — triggered oscilloscope locked to the lowest held note, spectrum analyser with the live filter curve, ADSR shape with a dot per sounding voice, 16 voice lights and an L/R output meter with peak hold and clip light
 - **16-step sequencer** — sample-accurate end to end, synced to the host transport or its own tempo, with swing, gate, five step rates and three keyboard modes (Layer / Replace / Transpose); the pattern is saved with the session
-- **Custom neon GUI** — background image, cyan/magenta/amber controls; resizable from 75% to 200%; a **?** button opens quick help
+- **Custom neon GUI** — a 1280 × 860 window of panels with cyan/magenta/amber controls and labels of 12 px or more; it opens at 100% if that fits the screen (otherwise 75%) and resizes from 75% to 150%; a **?** button opens quick help
 - **MIDI** — works with any MIDI controller or keyboard
 - **MIDI Logging** — optional, real-time-safe logging of received MIDI messages to a file (`NEONSYNTH_MIDILOG=<file>`, or `--midilog <file>` in the Standalone)
 - **DAW automation** — all parameters are automatable in VST3 hosts
