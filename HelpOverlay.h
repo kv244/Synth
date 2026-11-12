@@ -10,8 +10,8 @@
     Quick-reference help for Neon Synth, shown over the whole editor when the
     "?" button is pressed.
 
-    The text is laid out on the editor's 760 x 520 design grid and drawn under
-    the same uniform scale as everything else, so it stays legible at any
+    The text is laid out on the editor's 1280 x 860 design grid (the overlay is a
+    child of the scaled content, so it stays legible at any
     window size without re-flowing. It is plain static text, built once.
 
     Closing: click anywhere on the overlay or press Escape. The editor's "?"
@@ -27,7 +27,7 @@ public:
     /** Called when the overlay closes itself (click or Escape), so the owner can update its button. */
     std::function<void()> onClose;
 
-    explicit HelpOverlay (int designWidth) : baseWidth (designWidth)
+    HelpOverlay (int designWidth, int designHeight) : baseWidth (designWidth), baseHeight (designHeight)
     {
         buildColumns();
         setWantsKeyboardFocus (true);
@@ -37,25 +37,22 @@ public:
     {
         g.fillAll (juce::Colours::black.withAlpha (0.82f));
 
-        const float s = (float) getWidth() / (float) baseWidth;
-        g.addTransform (juce::AffineTransform::scale (s));
-
-        neon::drawPanel (g, { 20.0f, 16.0f, (float) baseWidth - 40.0f, 594.0f }, neon::cyan);
+        neon::drawPanel (g, { 20.0f, 16.0f, (float) baseWidth - 40.0f, (float) baseHeight - 32.0f }, neon::cyan);
 
         g.setColour (juce::Colours::white);
-        g.setFont (neon::font (18.0f));
-        g.drawText ("NEON SYNTH - QUICK HELP", 36, 26, 400, 26, juce::Justification::left);
+        g.setFont (neon::font (20.0f));
+        g.drawText ("NEON SYNTH - QUICK HELP", 40, 28, 500, 30, juce::Justification::left);
 
         g.setColour (neon::cyan.withAlpha (0.6f));
-        g.setFont (neon::font (11.0f));
-        g.drawText ("Click anywhere or press Esc to close", baseWidth - 336, 30, 300, 20,
+        g.setFont (neon::font (13.0f));
+        g.drawText ("Click anywhere or press Esc to close", baseWidth - 440, 32, 400, 22,
                     juce::Justification::right);
 
         for (size_t i = 0; i < columns.size(); ++i)
         {
             juce::TextLayout layout;
             layout.createLayout (columns[i], columnWidth);
-            layout.draw (g, { columnX[i], 62.0f, columnWidth, 542.0f });
+            layout.draw (g, { columnX[i], 76.0f, columnWidth, (float) baseHeight - 100.0f });
         }
     }
 
@@ -92,9 +89,9 @@ private:
     /** Appends a heading and its lines to one column. */
     static void addSection (juce::AttributedString& text, const Section& section, juce::Colour colour)
     {
-        text.append (juce::String (section.first) + "\n", neon::font (12.5f, true), colour);
+        text.append (juce::String (section.first) + "\n", neon::font (15.0f, true), colour);
         for (const auto* line : section.second)
-            text.append (juce::String (line) + "\n", neon::font (11.5f), juce::Colours::white.withAlpha (0.85f));
+            text.append (juce::String (line) + "\n", neon::font (13.5f), juce::Colours::white.withAlpha (0.85f));
         text.append ("\n", neon::font (7.0f), colour);   // gap before the next heading
     }
 
@@ -158,9 +155,9 @@ private:
             "The pattern, the sample (up to 10 MB, otherwise by its path) and all settings are saved with your DAW project (and by the Standalone between runs)." } }, neon::cyan);
     }
 
-    const int baseWidth;
-    static constexpr float columnWidth = 330.0f;
-    static constexpr float columnX[2] = { 36.0f, 394.0f };
+    const int baseWidth, baseHeight;
+    static constexpr float columnWidth = 560.0f;
+    static constexpr float columnX[2] = { 40.0f, 680.0f };
     std::array<juce::AttributedString, 2> columns;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (HelpOverlay)

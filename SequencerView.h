@@ -82,7 +82,7 @@ public:
             }
 
             // Note name
-            g.setFont (neon::font (juce::jmin (12.0f, cell.getWidth() * 0.32f)));
+            g.setFont (neon::font (juce::jmin (14.0f, cell.getWidth() * 0.32f)));
             g.setColour (s.on ? juce::Colours::white : neon::amber.withAlpha (0.4f));
             g.drawText (juce::MidiMessage::getMidiNoteName (s.note, true, true, 4),
                         cell.withTrimmedBottom (6.0f), juce::Justification::centred);

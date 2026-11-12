@@ -29,6 +29,7 @@
 */
 #include "NeonSynthProcessor.h"
 #include <cstdio>
+#include <cstdlib>
 #include <map>
 
 namespace
@@ -163,6 +164,8 @@ namespace
         }
     }
 
+    constexpr int baseWidth = 1280, baseHeight = 860;   // the editor's design size
+
     constexpr const char* sourceNames[] = { "Oscillator", "Sample", "Granular", "Random" };
 
     // What the strip under SOURCE shows for each source (1 = shown).
@@ -207,6 +210,8 @@ int main()
         return 1;
     }
     auto& ed = *editor;
+    const int openedWidth = ed.getWidth(), openedHeight = ed.getHeight();
+    ed.setSize (baseWidth, baseHeight);   // the checks below run at 100%, whatever size the editor opened at
     pump (200);   // the built-in pad loads on a background thread
     Mouse mouse;
 
@@ -262,6 +267,32 @@ int main()
                 outside.add (c->getComponentID());
         check (outside.isEmpty(), juce::String (sourceNames[source]) + ": every shown control lies inside the window"
                                       + (outside.isEmpty() ? juce::String() : " (" + outside.joinIntoString (", ") + ")"));
+    }
+
+    //==========================================================================
+    std::printf ("\nThe window: opening size, limits, and legible labels\n");
+    {
+        const bool opensAt75  = openedWidth == baseWidth * 3 / 4 && openedHeight == baseHeight * 3 / 4;
+        const bool opensAt100 = openedWidth == baseWidth && openedHeight == baseHeight;
+        check (opensAt75 || opensAt100, "it opens at 75% or 100% of 1280 x 860 (opened at " + juce::String (openedWidth) + " x " + juce::String (openedHeight) + ")");
+
+        const auto* constrainer = ed.getConstrainer();
+        check (constrainer != nullptr && ed.isResizable()
+                   && constrainer->getMinimumWidth() == baseWidth * 3 / 4 && constrainer->getMaximumWidth() == baseWidth * 3 / 2
+                   && constrainer->getMinimumHeight() == baseHeight * 3 / 4 && constrainer->getMaximumHeight() == baseHeight * 3 / 2,
+               "it resizes from 75% to 150%");
+
+        // At 100% a font height is a pixel height: every label is 12 px or more.
+        juce::StringArray small;
+        std::function<void (juce::Component&)> scan = [&] (juce::Component& c)
+        {
+            if (auto* label = dynamic_cast<juce::Label*> (&c); label != nullptr && label->getFont().getHeight() < 12.0f)
+                small.add (juce::String (label->getFont().getHeight(), 1) + " px at " + label->getBounds().toString());
+            for (auto* child : c.getChildren())
+                scan (*child);
+        };
+        scan (ed);
+        check (small.isEmpty(), "every label is at least 12 px at 100%" + (small.isEmpty() ? juce::String() : " (small: " + small.joinIntoString ("; ") + ")"));
     }
 
     //==========================================================================
@@ -462,7 +493,6 @@ int main()
     //==========================================================================
     std::printf ("\nEvery view paints, at every size, for every source\n");
     {
-        constexpr int baseWidth = 760, baseHeight = 626;   // the editor's design size; P1 changes it
         auto* spectrumButton = dynamic_cast<juce::Button*> (find (ed, "spectrumButton"));
         auto* scopeButton = dynamic_cast<juce::Button*> (find (ed, "scopeButton"));
         auto* helpButton = dynamic_cast<juce::Button*> (find (ed, "helpButton"));
@@ -486,6 +516,11 @@ int main()
                         pump (70);   // two timer ticks: views refresh from the voices
 
                         const auto image = ed.createComponentSnapshot (ed.getLocalBounds(), true, 1.0f);
+                        if (const auto* dir = std::getenv ("NEONSYNTH_SNAPSHOT_DIR"); dir != nullptr && image.isValid())   // look at them: set this to a folder
+                            if (juce::File (dir).createDirectory().wasOk())
+                                if (juce::FileOutputStream out (juce::File (dir).getChildFile (juce::String (juce::roundToInt (scale * 100)) + "-" + sourceNames[source]
+                                                                          + (view == 0 ? "-scope" : "-spectrum") + (withHelp ? "-help" : "") + ".png")); out.openedOk())
+                                    juce::PNGImageFormat().writeImageToStream (image, out);
                         ++painted;
                         if (! image.isValid() || image.getWidth() != ed.getWidth() || image.getHeight() != ed.getHeight())
                             problems.add (juce::String (scale) + "x " + sourceNames[source]);

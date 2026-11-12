@@ -475,7 +475,7 @@ audio_bright = plugin.process(msgs, 2.5, SR, reset=True)
 | `tests/compare_versions.py` | Renders a set of sessions through two VST3 builds and requires identical audio (CI compares against the v1.6.0 release) |
 | `Visualisers.h` | Oscilloscope, spectrum analyser, ADSR graph, voice lights and L/R meter (message thread only) |
 | `CMakeLists.txt` | Build config — Standalone + VST3, JUCE path, binary resources |
-| `gui_background.png` | Neon grid background image (embedded as binary data) |
+| `gui_background.png` | Old neon grid background (embedded as binary data; the 1280 x 860 window draws flat panels instead and no longer uses it) |
 | `icon.png` | Application / plugin icon |
 | `test_midi.py` | Automated Python test suite |
 | `log_to_midi.py` | Converts a captured `midi.log` into a Standard MIDI File |

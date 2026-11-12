@@ -21,11 +21,17 @@
 
 namespace neon
 {
-    inline const juce::Colour cyan    { 0xff00ffff };
-    inline const juce::Colour magenta { 0xffff00ff };
-    inline const juce::Colour amber   { 0xffffcc00 };
+    inline const juce::Colour cyan    { 0xff19e6ff };
+    inline const juce::Colour magenta { 0xffff4fd8 };
+    inline const juce::Colour amber   { 0xffffb319 };
     inline const juce::Colour red     { 0xffff3355 };
-    inline const juce::Colour panel   { 0xd8050a12 };
+    inline const juce::Colour panel   { 0xff0b0e17 };   // the dark inset behind a view
+
+    inline const juce::Colour background  { 0xff0a0c13 };   // the window
+    inline const juce::Colour section     { 0xff121624 };   // a panel of controls
+    inline const juce::Colour sectionEdge { 0xff232a3d };
+    inline const juce::Colour text        { 0xffe6ebf5 };
+    inline const juce::Colour muted       { 0xffa3adc2 };
 
     inline juce::Font font (float height, bool bold = false)
     {
@@ -36,9 +42,9 @@ namespace neon
     inline void drawPanel (juce::Graphics& g, juce::Rectangle<float> r, juce::Colour edge)
     {
         g.setColour (panel);
-        g.fillRoundedRectangle (r, 4.0f);
+        g.fillRoundedRectangle (r, 6.0f);
         g.setColour (edge.withAlpha (0.35f));
-        g.drawRoundedRectangle (r.reduced (0.5f), 4.0f, 1.0f);
+        g.drawRoundedRectangle (r.reduced (0.5f), 6.0f, 1.0f);
     }
 
     /** Strokes a path with a soft neon glow: two wide faint passes under a thin bright one. */
@@ -220,7 +226,7 @@ public:
         }
         neon::strokeGlow (g, trace, neon::cyan);
 
-        g.setFont (neon::font (10.0f));
+        g.setFont (neon::font (12.0f));
         g.setColour (neon::cyan.withAlpha (0.7f));
         juce::String label ("free run");
         if (lockHz > 0.0f)
@@ -228,7 +234,7 @@ public:
             const int note = juce::roundToInt (12.0f * std::log2 (lockHz / 440.0f)) + 69;
             label = juce::MidiMessage::getMidiNoteName (note, true, true, 4) + "  " + neon::formatHz (lockHz);
         }
-        g.drawText (label, area.removeFromTop (14.0f), juce::Justification::topRight);
+        g.drawText (label, area.removeFromTop (16.0f), juce::Justification::topRight);
     }
 
 private:
@@ -320,10 +326,10 @@ public:
         const auto bounds = getLocalBounds().toFloat();
         neon::drawPanel (g, bounds, neon::cyan);
         auto area = bounds.reduced (8.0f);
-        area.removeFromBottom (12.0f);   // room for frequency labels
+        area.removeFromBottom (16.0f);   // room for frequency labels
 
         // Grid and labels
-        g.setFont (neon::font (9.0f));
+        g.setFont (neon::font (12.0f));
         for (const float f : { 50.0f, 100.0f, 200.0f, 500.0f, 1000.0f, 2000.0f, 5000.0f, 10000.0f })
         {
             if (f >= maxHz()) continue;
@@ -332,7 +338,7 @@ public:
             g.drawVerticalLine (juce::roundToInt (x), area.getY(), area.getBottom());
             g.setColour (neon::cyan.withAlpha (0.5f));
             g.drawText (f < 1000.0f ? juce::String ((int) f) : juce::String ((int) (f / 1000.0f)) + "k",
-                        juce::Rectangle<float> (x - 15.0f, area.getBottom() + 1.0f, 30.0f, 11.0f),
+                        juce::Rectangle<float> (x - 18.0f, area.getBottom() + 1.0f, 36.0f, 14.0f),
                         juce::Justification::centred);
         }
         for (const float db : { -24.0f, -48.0f, -72.0f })
@@ -341,7 +347,7 @@ public:
             g.setColour (neon::cyan.withAlpha (0.08f));
             g.drawHorizontalLine (juce::roundToInt (y), area.getX(), area.getRight());
             g.setColour (neon::cyan.withAlpha (0.4f));
-            g.drawText (juce::String ((int) db), juce::Rectangle<float> (area.getX() + 2.0f, y - 11.0f, 30.0f, 10.0f),
+            g.drawText (juce::String ((int) db), juce::Rectangle<float> (area.getX() + 2.0f, y - 15.0f, 36.0f, 14.0f),
                         juce::Justification::left);
         }
 
@@ -390,10 +396,10 @@ public:
             g.setColour (neon::magenta.withAlpha (0.35f));
             g.drawVerticalLine (juce::roundToInt (x), area.getY(), area.getBottom());
             g.setColour (neon::magenta);
-            g.setFont (neon::font (10.0f));
-            const bool labelLeft = x > area.getRight() - 70.0f;
+            g.setFont (neon::font (12.0f));
+            const bool labelLeft = x > area.getRight() - 80.0f;
             g.drawText (neon::formatHz (fc),
-                        juce::Rectangle<float> (labelLeft ? x - 64.0f : x + 4.0f, area.getY(), 60.0f, 12.0f),
+                        juce::Rectangle<float> (labelLeft ? x - 74.0f : x + 4.0f, area.getY(), 70.0f, 15.0f),
                         labelLeft ? juce::Justification::right : juce::Justification::left);
         }
     }
@@ -508,8 +514,8 @@ public:
         bounds.removeFromTop (4.0f);
 
         // L / R captions
-        auto captions = bounds.removeFromBottom (11.0f);
-        g.setFont (neon::font (9.0f));
+        auto captions = bounds.removeFromBottom (15.0f);
+        g.setFont (neon::font (12.0f));
         g.setColour (neon::cyan.withAlpha (0.6f));
         g.drawText ("L", captions.removeFromLeft (captions.getWidth() * 0.5f), juce::Justification::centred);
         g.drawText ("R", captions, juce::Justification::centred);
