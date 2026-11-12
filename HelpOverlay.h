@@ -15,7 +15,8 @@
     window size without re-flowing. It is plain static text, built once.
 
     Closing: click anywhere on the overlay or press Escape. The editor's "?"
-    button also toggles it. The overlay takes all mouse clicks while it is
+    button also toggles it. Hosts do not always give the overlay keyboard focus,
+    so the editor also passes Escape on to dismiss() from whichever control has it. The overlay takes all mouse clicks while it is
     visible, so nothing underneath is changed by accident.
 
     To edit the help, change the entries in buildColumns() - each one is a
@@ -74,6 +75,15 @@ public:
         setVisible (true);
         toFront (true);
         grabKeyboardFocus();
+    }
+
+    /** Closes the overlay if it is open; returns true if it was. */
+    bool dismiss()
+    {
+        if (! isVisible())
+            return false;
+        close();
+        return true;
     }
 
 private:

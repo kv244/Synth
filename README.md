@@ -13,7 +13,7 @@ by **Razvan Julian Petrescu** / **AudioDSP**.
 waveform-listening exercises, the illustrated control guide and a tour of the
 C++ source. Learn the sound as a musician, or explore how it works as a coder.
 
-![NeonSynth v1.6.0 with a sawtooth and the sequencer running](docs/images/captures/ui-oscillator-running.png)
+![NeonSynth v1.7.0 with a sawtooth and the sequencer running](docs/images/captures/ui-oscillator-running.png)
 
 **[If you want to hear it in action](docs/demo/neonsynth-demo.wav)**: a 33-second piece (WAV, 6 MB) in which every
 sound is NeonSynth. Six instances play together: a granular pad, a Random-source bass through CHOP and the
@@ -144,7 +144,7 @@ the **AudioDSP** manufacturer in your DAW's instrument browser.
 | Sample view | Cyan | The waveform with the start (cyan line), the loop (amber brackets) and a white playhead per sounding voice; drag a marker to move it, click to set the start |
 | ROOT / START / L.START / L.END / XFADE | Cyan | Root key (plays the file at its own pitch), start point, loop start and end, and the loop crossfade (5–50 ms) |
 | ROOT / POS / SCAN / SIZE / DENS / SPRAY / JITTER | Magenta | With Source = Granular the knob row changes: position of the cloud (also draggable on the waveform), scan speed (−2× to +2×, 0 freezes), grain size (5–500 ms), density (1–200 grains/s), spray (how far grains scatter from the position) and pitch jitter (0–100 cents). The waveform then shows the position, the spray band and a tick per sounding grain |
-| ATK / DEC / SUS / REL | Amber | Envelope knobs, with their values shown underneath; the graph above them draws the shape and a dot for every sounding voice |
+| ATTACK / DECAY / SUSTAIN / RELEASE | Amber | Envelope knobs, with their values shown underneath; the graph above them draws the shape and a dot for every sounding voice, and its four points can be dragged (double-click resets one) |
 | Filter ON | Magenta | Toggle button — enables / bypasses the filter (dims the cutoff slider when off) |
 | Cutoff | Magenta | Low-pass filter cutoff frequency (20 Hz – 20 kHz) |
 | Voices | Cyan | One light per voice; brightness follows that voice's envelope |
@@ -152,7 +152,7 @@ the **AudioDSP** manufacturer in your DAW's instrument browser.
 | Meter | Cyan | Left / right output level with peak hold; the red light shows the output soft clipper working near its −1 dBFS ceiling (click the meter to reset) |
 | Gain | Cyan | Output level, −48 dB to +6 dB |
 | Width | Cyan | Stereo spread of voices by pitch, 0–100% |
-| ? | Cyan | Quick help drawn over the window — sequencer editing, modes, controls and no-sound tips. Click anywhere or press Esc to close |
+| ? | Cyan | Quick help drawn over the window — sequencer editing, modes, controls and no-sound tips. Click anywhere or press Esc (from any control) to close |
 
 ---
 
@@ -210,7 +210,7 @@ ctest --test-dir build -C Release --output-on-failure
 | `GranularTests` | The granular source: bit-identical renders from the same seed, grain counts at 5 / 50 / 200 per second, steady level across size and density, pitch, the 32-grain cap, scan speed and freeze, retrigger without cutting grains, stopping, the sample reference |
 | `RealtimeSafetyTests` | Hooks `operator new`/`delete` and fails if `processBlock` allocates or frees while rendering chords, the sequencer, every waveform and every source as another thread keeps replacing the sample |
 | `ParameterLayoutTests` | Every parameter's ID, place, type, range, skew, default and choices against `tests/parameter-layout.txt`: parameters may only be appended (hosts store sessions by ID and normalised value). After appending one, update the reference with `ParameterLayoutTests --write` |
-| `EditorTests` | Opens the editor offscreen and drives it with mouse events: every parameter has a control, each source shows its own controls with nothing overlapping, knobs, boxes and buttons write their parameter in one gesture and follow it, the step grid, the CHOP strip, the sample markers, the view and help buttons; then paints every view at 75%, 100% and 150% for every source. Finds controls only by component ID, so it carries over to a new layout. On Linux it needs an X display (`xvfb-run`) |
+| `EditorTests` | Opens the editor offscreen and drives it with mouse events: every parameter has a control, each source shows its own controls with nothing overlapping, knobs, boxes and buttons write their parameter in one gesture and follow it, the step grid, the CHOP strip, the sample markers, the four envelope points, the view and help buttons (Esc closes help from any control); then paints every view at 75%, 100% and 150% for every source. Finds controls only by component ID, so it carries over to a new layout. On Linux it needs an X display (`xvfb-run`) |
 | `RenderBenchmark` | Times `processBlock` directly (no host) for idle, one note, 16 voices, 16 voices on each of the Sample, Random and Granular sources, 16 sculpted voices (CHOP, Noise and Fold all on), and a dense sequencer + chords load |
 
 ### Performance
