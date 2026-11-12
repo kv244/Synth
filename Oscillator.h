@@ -233,6 +233,14 @@ private:
     float pendingOvertone = 0.0f;
 };
 
+/**
+    The oscillator for the four waveforms.
+
+    The name is historical: up to v1.5.0 it used 2-point PolyBLEP. Since v1.6.0 it uses the
+    4-point BLEP and BLAMP residuals in Blep4 above, so "BandLimitedOscillator" would describe
+    it better. Not renamed yet, because the name is used across the voice, the views and the
+    tests (code review, 12 Nov 2026); do it when those files are next open for another reason.
+*/
 class PolyBlepOscillator
 {
 public:

@@ -160,6 +160,16 @@ public:
     /** Message thread (or any thread except the audio thread). */
     SampleStatus getSampleStatus() const;
 
+    /**
+        Message thread. Frees samples that were replaced while notes still played them, once
+        those notes have ended. A load and stopping the audio do this too; the editor's timer
+        calls it so that memory comes back without waiting for either.
+    */
+    void freeReplacedSamples()                    { sampleSlot.collectGarbage(); }
+
+    /** Replaced samples still waiting to be freed (for tests). */
+    int getNumRetiredSamples() const              { return sampleSlot.getNumRetired(); }
+
     /** Calls `fn (const SampleData*)` with the current sample, safely against a concurrent load. Not for the audio thread. */
     template <typename Fn>
     auto withCurrentSample (Fn&& fn) const   { return sampleSlot.withCurrent (std::forward<Fn> (fn)); }
@@ -273,8 +283,12 @@ private:
     juce::String missingSampleHash;
     juce::String sampleProblem;
 
-    std::atomic<int>  sampleLoadGeneration { 0 };
-    std::atomic<bool> sampleLoading { false };
+    // Every request to change the sample (a load, PAD, a session) takes the next generation,
+    // and only the newest may publish. backgroundLoadGeneration is the generation of the
+    // background load still running, or 0: the status shows "loading..." only while that load
+    // is also the newest request, so one that was overtaken can't leave the status stuck.
+    std::atomic<int> sampleLoadGeneration { 0 };
+    std::atomic<int> backgroundLoadGeneration { 0 };
     juce::ThreadPool  sampleLoader { juce::ThreadPoolOptions{}.withThreadName ("NeonSynth sample loader").withNumberOfThreads (1) };
 
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();

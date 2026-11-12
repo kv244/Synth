@@ -587,14 +587,14 @@ void NeonSynthProcessor::publishSample (std::unique_ptr<SampleData> sample, cons
 void NeonSynthProcessor::loadSampleFileAsync (const juce::File& file)
 {
     const int generation = ++sampleLoadGeneration;
-    sampleLoading = true;
+    backgroundLoadGeneration = generation;
 
     sampleLoader.addJob ([this, file, generation]
     {
         auto result = SampleLoader::loadFile (file);
 
         if (generation != sampleLoadGeneration.load())
-            return;   // a newer load was requested meanwhile
+            return;   // overtaken by a newer request, which owns the status now
 
         if (result.sample != nullptr)
             publishSample (std::move (result.sample));
@@ -604,7 +604,8 @@ void NeonSynthProcessor::loadSampleFileAsync (const juce::File& file)
             sampleProblem = file.getFileName() + ": " + result.error;
         }
 
-        sampleLoading = false;
+        int expected = generation;
+        backgroundLoadGeneration.compare_exchange_strong (expected, 0);   // done, unless a newer load has started
         updateHostDisplay (ChangeDetails().withNonParameterStateChanged (true));
     });
 }
@@ -646,7 +647,8 @@ NeonSynthProcessor::SampleStatus NeonSynthProcessor::getSampleStatus() const
 
     const juce::ScopedLock sl (sampleInfoLock);
     status.problem = sampleProblem;
-    status.loading = sampleLoading.load();
+    const int loading = backgroundLoadGeneration.load();
+    status.loading = loading != 0 && loading == sampleLoadGeneration.load();
     return status;
 }
 

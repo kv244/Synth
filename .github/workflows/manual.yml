@@ -8,7 +8,7 @@ name: Manual
 
 on:
   push:
-    branches: [master, main, 'v[0-9]*']
+    branches: [master, main, 'v[0-9]+']   # v17, not v17-p3: a PR's own branch is tested by pull_request alone
     paths:
       - 'docs/**'
       - 'CMakeLists.txt'

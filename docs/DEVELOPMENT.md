@@ -77,7 +77,7 @@ ctest --test-dir build -C Release --output-on-failure
 | `GranularTests` | The granular source: bit-identical renders from the same seed, grain counts at 5 / 50 / 200 per second, steady level across size and density, pitch, the 32-grain cap, scan speed and freeze, retrigger without cutting grains, stopping, the sample reference |
 | `RealtimeSafetyTests` | Hooks `operator new`/`delete` and fails if `processBlock` allocates or frees while rendering chords, the sequencer, every waveform and every source as another thread keeps replacing the sample |
 | `ParameterLayoutTests` | Every parameter's ID, place, type, range, skew, default and choices against `tests/parameter-layout.txt`: parameters may only be appended (hosts store sessions by ID and normalised value). After appending one, update the reference with `ParameterLayoutTests --write` |
-| `EditorTests` | Opens the editor offscreen and drives it with mouse events: every parameter has a control, each source shows its own controls with nothing overlapping, knobs, boxes and buttons write their parameter in one gesture and follow it, the step grid, the CHOP strip, the sample markers, the four envelope points, the view and help buttons (Esc closes help from any control); then paints every view at 75%, 100% and 150% for every source. Finds controls only by component ID, so it carries over to a new layout. On Linux it needs an X display (`xvfb-run`) |
+| `EditorTests` | Opens the editor offscreen and drives it with mouse events: every parameter has a control, each source shows its own controls with nothing overlapping, knobs, boxes and buttons write their parameter in one gesture and follow it, the step grid, the CHOP strip, the sample markers, the four envelope points, the view and help buttons (Esc closes help from any control), a replaced sample being freed once its notes end, and a background load that is overtaken; then paints every view at 75%, 100% and 150% for every source. Finds controls only by component ID, so it carries over to a new layout. On Linux it needs an X display (`xvfb-run`) |
 | `RenderBenchmark` | Times `processBlock` directly (no host) for idle, one note, 16 voices, 16 voices on each of the Sample, Random and Granular sources, 16 sculpted voices (CHOP, Noise and Fold all on), and a dense sequencer + chords load |
 
 ### Performance
@@ -110,7 +110,6 @@ MIDI ports, loopMIDI, or DAW required.
 
 ```bash
 pip install -r requirements-test.txt     # pedalboard, mido, numpy (pinned)
-pip install sounddevice soundfile        # optional: --play and --save
 ```
 
 ### Run all tests
@@ -167,22 +166,15 @@ python tests/compare_versions.py old/NeonSynth.vst3 build/NeonSynth_artefacts/Re
 
 ### Render and hear audio
 
-The script can also render a demo arpeggio and play it through your speakers
-or save it to a WAV file — no MIDI keyboard or DAW needed.
+`docs/demo/make_demo.py` renders the demo piece linked from the README: six instances of the
+VST3, one per part, summed and saved as a WAV file. It is also the fullest example of driving
+the plugin from Python (parameters by name, MIDI at exact samples, automation every 25 ms).
 
 ```bash
-# play through speakers
-python test_midi.py --play
-
-# save to WAV
-python test_midi.py --save output.wav
-
-# both at once
-python test_midi.py --play --save output.wav
+python docs/demo/make_demo.py build/NeonSynth_artefacts/Release/VST3/NeonSynth.vst3 demo.wav
 ```
 
-The demo renders a C major arpeggio with a sawtooth oscillator and a 1.1 kHz
-filter cutoff — warm and analog rather than chiptune.
+The Random and Granular parts are random, so two renders differ slightly.
 
 ### MIDI Logging
 
@@ -345,8 +337,7 @@ audio_bright = plugin.process(msgs, 2.5, SR, reset=True)
 | `tests/EditorTests.cpp` | Offscreen editor tests (gestures and painting) |
 | `tests/compare_versions.py` | Renders a set of sessions through two VST3 builds and requires identical audio (CI compares against the v1.6.0 release) |
 | `Visualisers.h` | Oscilloscope, spectrum analyser, ADSR graph, voice lights and L/R meter (message thread only) |
-| `CMakeLists.txt` | Build config — Standalone + VST3, JUCE path, binary resources |
-| `gui_background.png` | Old neon grid background (embedded as binary data; the 1280 x 860 window draws flat panels instead and no longer uses it) |
+| `CMakeLists.txt` | Build config — Standalone + VST3, JUCE path, the test programs |
 | `icon.png` | Application / plugin icon |
 | `test_midi.py` | Automated Python test suite |
 | `log_to_midi.py` | Converts a captured `midi.log` into a Standard MIDI File |
@@ -358,7 +349,7 @@ audio_bright = plugin.process(msgs, 2.5, SR, reset=True)
 | `docs/images/` | The manual's figures and cover (SVG and PNG), and the raw application captures |
 | `docs/requirements-manual.txt` | Pinned Python dependencies for the PDF build |
 | `pyproject.toml` | Ruff lint configuration |
-| `.github/workflows/test.yml` | CI on every PR — Windows build, unit tests, Python suite, pluginval (strictness 5), CPU benchmark |
+| `.github/workflows/test.yml` | CI on every PR — Windows build, unit tests, Python suite, the comparison with the reference release, pluginval (strictness 10, as at release), CPU benchmark |
 | `.github/workflows/build.yml` | CI — CMake build and unit tests on Ubuntu (GCC) |
 | `.github/workflows/lint.yml` | CI — ruff lint of every Python file |
 | `.github/workflows/manual.yml` | CI — checks the manual against the version and builds its PDF |

@@ -24,8 +24,10 @@
         that might have read the old pointer has finished, and any voice
         that took the sample has counted itself in `users`), and
       - its `users` count is back to zero.
-    collectGarbage() frees what qualifies; publish() and the destructor call
-    it too. While the audio thread isn't running (setAudioRunning (false)),
+    collectGarbage() frees what qualifies. publish() and setAudioRunning() call
+    it, and the editor's timer does (through the processor), so a sample
+    replaced while notes played it is freed soon after they end. With the
+    editor closed it waits for the next load or for the audio to stop. While the audio thread isn't running (setAudioRunning (false)),
     nothing can be reading the pointer, so replaced samples are freed at once.
 
     The audio thread never allocates, frees or locks here.
