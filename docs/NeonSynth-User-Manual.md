@@ -43,7 +43,7 @@ The sound-design settings are starting points, not factory presets. Begin at a l
 
 ### Install the Windows release
 
-Download `NeonSynth-1.7.0-Windows-Setup.exe` from the [v1.7.0 release page](https://github.com/kv244/Synth/releases/tag/v1.7.0). The installer provides the VST3 instrument and an optional standalone application (see [Download](../README.md#download) in the README).
+Download `NeonSynth-1.7.0-Windows-Setup.exe` from the [v1.7.0 release page](https://github.com/kv244/Synth/releases/tag/v1.7.0). The installer provides the VST3 instrument and an optional standalone application (see [Installation](../README.md#installation) in the README).
 
 | Component | Default location |
 |---|---|
@@ -76,7 +76,7 @@ The main editor does not provide an on-screen piano keyboard. If you have no har
 
 ### Use NeonSynth in a DAW
 
-Rescan your DAW's VST3 instruments if NeonSynth does not appear after installation, then look for the **AudioDSP** manufacturer. With **SYNC** enabled, press **RUN** in NeonSynth and start the DAW transport to hear its sequence; the **HOST** tempo readout indicates that the host clock is being used (see [VST3](../README.md#vst3) and [Step Sequencer](../README.md#step-sequencer) in the README).
+Rescan your DAW's VST3 instruments if NeonSynth does not appear after installation, then look for the **AudioDSP** manufacturer. With **SYNC** enabled, press **RUN** in NeonSynth and start the DAW transport to hear its sequence; the **HOST** tempo readout indicates that the host clock is being used.
 
 NeonSynth is an instrument, not an effect for processing a live audio input. To use recorded audio as a sound source, load it into the Sample or Granular engine.
 
@@ -588,7 +588,7 @@ It is an editorial guide, not a requirement to read every file in this order.
 
 A useful first experiment is to change a default envelope time in `createParameterLayout()`, rebuild, and open a fresh instance to hear the result. Existing saved sessions can restore their own settings, so they are not a reliable way to check that a new default has taken effect ([parameter definitions and state restoration](https://github.com/kv244/Synth/blob/v1.7.0/NeonSynthProcessor.cpp)).
 
-For a deeper exercise, inspect why a waveform change waits for a cycle boundary or how grain size and density affect overlap. Make one change at a time, work on a branch, and run the relevant tests before comparing the result with the original; the README's [Unit tests and benchmark](../README.md#unit-tests-and-benchmark) section lists what each test checks.
+For a deeper exercise, inspect why a waveform change waits for a cycle boundary or how grain size and density affect overlap. Make one change at a time, work on a branch, and run the relevant tests before comparing the result with the original; the developer notes' [Unit tests and benchmark](DEVELOPMENT.md#unit-tests-and-benchmark) section lists what each test checks.
 
 Source availability is an invitation to inspect and experiment, not a promise that every edit is safe for real-time audio. In particular, avoid adding file I/O, blocking work, or heap allocation to the audio callback; the project includes a real-time-safety test specifically checking rendering-time allocation/deallocation.
 
@@ -634,7 +634,7 @@ These details follow the [voice engine](https://github.com/kv244/Synth/blob/v1.7
 
 ### Optional MIDI diagnostics
 
-Launch the standalone application with `--midilog`, or set `NEONSYNTH_MIDILOG` before starting a host, to log received MIDI messages. Use an absolute path to avoid uncertainty about the working directory; logging is a diagnostic facility, not an audio recorder (see [MIDI Logging](../README.md#midi-logging) in the README).
+Launch the standalone application with `--midilog`, or set `NEONSYNTH_MIDILOG` before starting a host, to log received MIDI messages. Use an absolute path to avoid uncertainty about the working directory; logging is a diagnostic facility, not an audio recorder (see [MIDI Logging](DEVELOPMENT.md#midi-logging) in the developer notes).
 
 ```powershell
 & "C:\Program Files\AudioDSP\Neon Synth\NeonSynth.exe" --midilog "C:\Users\YourName\Documents\NeonSynth-midi.log"

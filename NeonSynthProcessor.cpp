@@ -159,7 +159,7 @@ NeonSynthProcessor::NeonSynthProcessor()
     // samples of its last render point immediately, so a note could start up to
     // 31 samples early. Splitting on every event keeps keyboard and sequencer
     // notes on their exact sample; the extra sub-blocks only appear when events
-    // are dense, and cost little (see README, "Performance").
+    // are dense, and cost little (see docs/DEVELOPMENT.md, "Performance").
     synth.setMinimumRenderingSubdivisionSize (1, true);
 
     waveformParameter      = getTypedParameter<juce::AudioParameterChoice> (apvts, "waveform");
