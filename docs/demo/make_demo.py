@@ -3,6 +3,9 @@
 # Licensed under the GNU Affero General Public License v3; see LICENSE.
 """
 Renders the demo piece, docs/demo/neonsynth-demo.wav, from the NeonSynth VST3.
+The WAV is not kept in git (it is in .gitignore). One copy, the latest, is the asset
+of the 'demo' release, which the README links to; after a re-render replace it with
+    gh release upload demo docs/demo/neonsynth-demo.wav --clobber
 
 Every sound is NeonSynth: six instances of the plugin, one per part, each
 rendered offline with pedalboard and summed. Nothing else touches the audio

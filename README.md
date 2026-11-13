@@ -14,7 +14,7 @@ and the **[user manual](docs/NeonSynth-User-Manual.md)** teaches it by ear and m
 
 ![NeonSynth v1.7.0 with a sawtooth and the sequencer running](docs/images/captures/ui-oscillator-running.png)
 
-**[If you want to hear it in action](docs/demo/neonsynth-demo.wav)**: a 33-second piece (WAV, 6 MB) in which every
+**[If you want to hear it in action](https://github.com/kv244/Synth/releases/download/demo/neonsynth-demo.wav)**: a 33-second piece (WAV, 6 MB) in which every
 sound is NeonSynth. Six instances play together: a granular pad, a Random-source bass through CHOP and the
 wavefolder, a chopped sawtooth arpeggio, the built-in step sequencer with swing, noise hats and a looped-sample
 lead. [`docs/demo/make_demo.py`](docs/demo/make_demo.py) renders it from the VST3.

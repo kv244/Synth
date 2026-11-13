@@ -68,10 +68,25 @@ Section "Standalone Application" SEC_STANDALONE
                   "$INSTDIR\NeonSynth.exe"
 SectionEnd
 
+; The user manual as a PDF, next to the Standalone in the main NeonSynth folder. The release
+; workflow builds the PDF first (build\manual\), so the installer carries the same file that
+; is attached to the release.
+Section "User Manual (PDF)" SEC_MANUAL
+  ; Earlier versions' manuals carry their version in the name; remove them on upgrade.
+  Delete "$INSTDIR\NeonSynth-User-Manual-*.pdf"
+  SetOutPath "$INSTDIR"
+  File "build\manual\NeonSynth-User-Manual-${PRODUCT_VERSION}.pdf"
+
+  CreateDirectory "$SMPROGRAMS\${PRODUCT_PUBLISHER}"
+  CreateShortcut  "$SMPROGRAMS\${PRODUCT_PUBLISHER}\${PRODUCT_NAME} User Manual.lnk" \
+                  "$INSTDIR\NeonSynth-User-Manual-${PRODUCT_VERSION}.pdf"
+SectionEnd
+
 ; ── Descriptions (shown in component page) ───────────────────────────────────
 !insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
   !insertmacro MUI_DESCRIPTION_TEXT ${SEC_VST3}       "VST3 plugin → $COMMONFILES64\VST3 (required)"
   !insertmacro MUI_DESCRIPTION_TEXT ${SEC_STANDALONE} "Standalone app with its own audio/MIDI settings"
+  !insertmacro MUI_DESCRIPTION_TEXT ${SEC_MANUAL}     "The user manual as a PDF, in the NeonSynth folder"
 !insertmacro MUI_FUNCTION_DESCRIPTION_END
 
 ; ── Post-install: write uninstaller + registry ───────────────────────────────
@@ -92,11 +107,13 @@ Section "Uninstall"
   RMDir /r "$COMMONFILES64\VST3\NeonSynth.vst3"
 
   Delete    "$INSTDIR\NeonSynth.exe"
+  Delete    "$INSTDIR\NeonSynth-User-Manual-*.pdf"
   Delete    "$INSTDIR\uninstall.exe"
   RMDir     "$INSTDIR"
   RMDir     "$PROGRAMFILES64\${PRODUCT_PUBLISHER}"
 
   Delete    "$SMPROGRAMS\${PRODUCT_PUBLISHER}\${PRODUCT_NAME}.lnk"
+  Delete    "$SMPROGRAMS\${PRODUCT_PUBLISHER}\${PRODUCT_NAME} User Manual.lnk"
   RMDir     "$SMPROGRAMS\${PRODUCT_PUBLISHER}"
 
   DeleteRegKey HKLM "${UNINST_KEY}"
