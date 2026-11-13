@@ -846,6 +846,7 @@ private:
         sampleView.refresh(); // sample, markers, playheads
         shapeView.refresh();  // the sculpted cycle, CHOP's steps
         updateReadouts();
+        processor.freeReplacedSamples();   // a sample replaced while notes played it, once they have ended
     }
 
     /** Everything the editor shows lives here, at the design size; resized() scales it to the window. */

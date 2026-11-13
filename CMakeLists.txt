@@ -39,11 +39,6 @@ juce_add_plugin(NeonSynth
 
 juce_generate_juce_header(NeonSynth)
 
-juce_add_binary_data(NeonSynthResources
-    SOURCES
-        gui_background.png
-)
-
 target_sources(NeonSynth
     PRIVATE
         NeonSynthVoice.h
@@ -76,7 +71,6 @@ target_compile_definitions(NeonSynth
 
 target_link_libraries(NeonSynth
     PRIVATE
-        NeonSynthResources
         juce::juce_core
         juce::juce_gui_basics
         juce::juce_audio_basics
@@ -146,7 +140,6 @@ if(NEONSYNTH_BUILD_TESTS)
             JUCE_MODAL_LOOPS_PERMITTED=1                          # EditorTests runs the message loop
             NEONSYNTH_TESTS_DIR="${CMAKE_CURRENT_LIST_DIR}/tests")   # ParameterLayoutTests' reference
         target_link_libraries(${program} PRIVATE
-            NeonSynthResources
             juce::juce_audio_utils
             juce::juce_audio_processors
             juce::juce_dsp

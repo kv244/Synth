@@ -13,7 +13,9 @@
       - combo boxes and buttons write their parameter, and follow it when it changes;
       - step grid: click toggles a step, drag changes its note, wheel nudges it;
       - CHOP strip: click toggles a step, a drag paints the same state across steps;
-      - sample view: click sets START, dragging a loop bracket moves it, Granular moves POS;
+      - sample view: click sets START, dragging a loop bracket moves it, Granular moves POS
+        (also where a loop bracket is hidden under it);
+      - a replaced sample is freed once its notes end, and an overtaken load clears "loading...";
       - envelope view: dragging A, D or R sideways changes that time, dragging S up or down
         sets the level, each in one gesture; a double-click resets a point; a click elsewhere
         does nothing;
@@ -166,6 +168,21 @@ namespace
             buffer.clear();
             p.processBlock (buffer, midi);
         }
+    }
+
+    /** A mono sine in a temporary WAV file; long enough that loading it takes a moment. */
+    juce::File writeTestWav (double seconds)
+    {
+        const auto file = juce::File::createTempFile (".wav");
+        juce::WavAudioFormat wav;
+        std::unique_ptr<juce::OutputStream> out = std::make_unique<juce::FileOutputStream> (file);
+        auto writer = wav.createWriterFor (out, juce::AudioFormatWriterOptions{}.withSampleRate (44100.0).withNumChannels (1).withBitsPerSample (24));
+
+        juce::AudioBuffer<float> b (1, (int) (seconds * 44100.0));
+        for (int i = 0; i < b.getNumSamples(); ++i)
+            b.setSample (0, i, 0.5f * (float) std::sin (juce::MathConstants<double>::twoPi * 330.0 * i / 44100.0));
+        writer->writeFromAudioSampleBuffer (b, 0, b.getNumSamples());
+        return file;
     }
 
     constexpr int baseWidth = 1280, baseHeight = 860;   // the editor's design size
@@ -462,8 +479,58 @@ int main()
         mouse.up (*view, at (0.7f), true);
         check (std::abs (valueOf (processor, "grPos") - 0.7f) < 0.01f && gestures.oneGesture (indexOf (processor, "grPos")),
                "Granular: a drag moves POS, in one gesture");
+
+        // L.END is at 80% and not drawn in Granular: a drag that starts on it is still a POS drag.
+        mouse.down (*view, at (0.8f));
+        mouse.drag (*view, at (0.6f));
+        mouse.up (*view, at (0.6f), true);
+        check (std::abs (valueOf (processor, "grPos") - 0.6f) < 0.01f && std::abs (valueOf (processor, "smpLoopEnd") - 0.8f) < 0.01f,
+               "Granular: a drag that starts on the hidden L.END bracket moves POS and leaves L.END alone");
     }
     else check (false, "sample view found");
+
+    //==========================================================================
+    std::printf ("\nSample loading and replaced samples\n");
+    {
+        const auto wav = writeTestWav (20.0);
+        set (processor, "seqOn", 0.0f);
+        set (processor, "source", 1.0f);
+
+        // A sample replaced while notes still play it is kept until they end, then freed
+        // by the editor's timer (nothing else runs once the notes have stopped).
+        const float releaseBefore = valueOf (processor, "release");
+        set (processor, "release", 0.05f);   // earlier sections left it wherever their gestures ended
+        juce::String error;
+        check (processor.loadSampleFile (wav, error), "the test file loads");
+        play (processor, true);
+        processor.useDefaultSample();
+        check (processor.getNumRetiredSamples() == 1, "a sample replaced while notes play it is kept for them");
+        for (int i = 0; i < 8; ++i)
+            play (processor, false);   // released: the voices fade out and let go of it
+        pump (150);
+        check (processor.getNumRetiredSamples() == 0, "once those notes have ended, the replaced sample is freed");
+        set (processor, "release", releaseBefore);
+
+        // A background load overtaken by PAD must not leave the status on "loading...".
+        processor.loadSampleFileAsync (wav);
+        processor.useDefaultSample();
+        for (int i = 0; i < 100 && processor.getSampleStatus().loading; ++i)
+            pump (50);
+        check (! processor.getSampleStatus().loading, "a load overtaken by PAD does not leave the status on loading...");
+        check (processor.getSampleStatus().name == "Default pad", "and the built-in pad is what plays");
+
+        // The same for two loads in a row: the status clears when the second one is in.
+        processor.loadSampleFileAsync (wav);
+        processor.loadSampleFileAsync (wav);
+        check (processor.getSampleStatus().loading, "while a file loads in the background the status says so");
+        for (int i = 0; i < 100 && processor.getSampleStatus().loading; ++i)
+            pump (50);
+        check (! processor.getSampleStatus().loading && processor.getSampleStatus().name == wav.getFileName(),
+               "two loads in a row end with the file loaded and the status clear");
+
+        processor.useDefaultSample();
+        wav.deleteFile();
+    }
 
     //==========================================================================
     std::printf ("\nEnvelope view: the four points\n");

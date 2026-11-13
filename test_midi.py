@@ -6,16 +6,12 @@
 NeonSynth automated tests using pedalboard + mido.
 Loads the VST3 directly — no MIDI ports, loopMIDI, or DAW required.
 
-  pip install pedalboard mido numpy sounddevice soundfile
+  pip install -r requirements-test.txt
 
 Run tests:
   python test_midi.py
 
-Play a rendered example through speakers:
-  python test_midi.py --play
-
-Save a rendered example to WAV:
-  python test_midi.py --save output.wav
+To hear the synth, render the demo piece instead: docs/demo/make_demo.py.
 """
 
 import os
@@ -29,32 +25,8 @@ try:
     import pedalboard
     import mido
 except ImportError as e:
-    sys.exit(f"Missing dependency: {e}\n  pip install pedalboard mido numpy sounddevice soundfile")
+    sys.exit(f"Missing dependency: {e}\n  pip install -r requirements-test.txt")
 
-
-# ---------------------------------------------------------------------------
-# Audio output helpers
-# ---------------------------------------------------------------------------
-
-def play_audio(audio: np.ndarray, sample_rate: int = 44100):
-    """Play a (channels, samples) float32 array through the default audio device."""
-    try:
-        import sounddevice as sd
-    except ImportError:
-        sys.exit("sounddevice not installed:  pip install sounddevice")
-    # sounddevice expects (samples, channels)
-    sd.play(audio.T, sample_rate)
-    sd.wait()
-
-
-def save_wav(audio: np.ndarray, path: str, sample_rate: int = 44100):
-    """Save a (channels, samples) float32 array to a WAV file."""
-    try:
-        import soundfile as sf
-    except ImportError:
-        sys.exit("soundfile not installed:  pip install soundfile")
-    sf.write(path, audio.T, sample_rate)
-    print(f"Saved: {path}")
 
 # ---------------------------------------------------------------------------
 # Config
@@ -925,34 +897,8 @@ TESTS = [
 ]
 
 
-def demo_render(plugin) -> np.ndarray:
-    """Render a short musical demo: C major arpeggio, sawtooth, warm filter."""
-    # Sawtooth + ~1 kHz cutoff gives a warm, analog character vs chiptune square
-    set_params(plugin, cutoff_hz=1100, waveform=3)
-    notes      = [60, 64, 67, 72, 67, 64, 60]
-    note_dur_s = 0.38                      # note duration in seconds
-    gap        = int(0.32 * SAMPLE_RATE)
-    chunk_dur  = 0.9                        # enough room for release tail
-    total_secs = gap * len(notes) / SAMPLE_RATE + chunk_dur
-    total      = np.zeros((2, int(total_secs * SAMPLE_RATE)), dtype=np.float32)
-    for i, note in enumerate(notes):
-        offset = i * gap
-        msgs = [
-            mido.Message("note_on",  note=note, velocity=100, time=0.0),
-            mido.Message("note_off", note=note, velocity=0,   time=note_dur_s),
-        ]
-        chunk = plugin.process(msgs, chunk_dur, SAMPLE_RATE, reset=True)
-        end = min(offset + chunk.shape[1], total.shape[1])
-        total[:, offset:end] += chunk[:, : end - offset]
-    return total
-
-
 def main():
     parser = argparse.ArgumentParser(description="NeonSynth test suite")
-    parser.add_argument("--play", action="store_true",
-                        help="render a demo and play it through speakers")
-    parser.add_argument("--save", metavar="FILE",
-                        help="render a demo and save it to a WAV file")
     parser.add_argument("--midilog", metavar="FILE",
                         help="path to write midi logs (processed by plugin)")
     parser.add_argument("--vst3", metavar="PATH",
@@ -976,15 +922,6 @@ def main():
     print("Loading plugin …")
     plugin = load_plugin()
     print(f"Parameters: {list(plugin.parameters.keys())}\n")
-
-    if args.play or args.save:
-        audio = demo_render(plugin)
-        if args.save:
-            save_wav(audio, args.save, SAMPLE_RATE)
-        if args.play:
-            print("Playing …")
-            play_audio(audio, SAMPLE_RATE)
-        return
 
     passed = failed = 0
     for label, fn in TESTS:

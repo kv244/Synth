@@ -241,8 +241,18 @@ public:
 
         A smoother at rest stays at rest for the whole call (targets only
         change between calls), so the choice holds for the block. Both versions
-        do the same operations in the same order, so the output is
-        bit-identical to the single loop this replaced, and whichever runs.
+        do the same operations in the same order, so the steady version is
+        bit-identical to the single loop this replaced.
+
+        Known flaw, kept on purpose for now: the gliding version reads the
+        level and filter-mix smoothers once before its loop (the two "steady"
+        values at the top of renderSamples(), which it then doesn't use), so
+        each call moves those two glides one sample further than it should. A
+        2 ms velocity glide or a 10 ms filter switch ends a few samples early;
+        it is not audible. Fixing it changes the output bits while something
+        glides (a retriggered or stolen voice, the filter switch, a Width
+        change), so it is left for the v1.8.0 filter work, where the voice's
+        render loop is reworked and re-verified anyway (code review, 12 Nov 2026).
 
         Why not render stage by stage (whole buffers through the oscillator,
         then the envelope, then the filter...) so the compiler can vectorise

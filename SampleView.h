@@ -166,10 +166,11 @@ public:
     {
         const float x = (float) e.x;
         const float grab = 8.0f;
-        const bool loopShown = markers.loopMode != SampleReader::oneShot;
+        const bool granular = markers.source == 2;
+        const bool loopShown = ! granular && markers.loopMode != SampleReader::oneShot;   // as paint() draws the brackets
 
-        dragging = markers.source == 2 ? "grPos" : "smpStart";   // Granular: anywhere moves the cloud
-        if (markers.source != 2 && loopShown && std::abs (x - xFor (markers.loopStart)) < grab)
+        dragging = granular ? "grPos" : "smpStart";   // Granular: anywhere moves the cloud
+        if (loopShown && std::abs (x - xFor (markers.loopStart)) < grab)
             dragging = "smpLoopStart";
         else if (loopShown && std::abs (x - xFor (markers.loopEnd)) < grab)
             dragging = "smpLoopEnd";
