@@ -224,7 +224,7 @@ int main()
     GestureLog gestures;
     processor.addListener (&gestures);
 
-    std::unique_ptr<juce::AudioProcessorEditor> editor (processor.createEditorIfNeeded());
+    std::unique_ptr<juce::AudioProcessorEditor> editor (processor.createEditorAndMakeActive());
     if (editor == nullptr)
     {
         std::printf ("FAIL  the processor made no editor\n");

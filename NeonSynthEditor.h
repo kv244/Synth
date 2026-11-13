@@ -437,7 +437,7 @@ private:
         constexpr int titleBar = 48;
         if (const auto* display = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay())
         {
-            const auto area = display->userArea;
+            const auto area = display->userBounds;   // logical pixels, bars excluded
             if (area.getWidth() < baseWidth || area.getHeight() < baseHeight + titleBar)
                 return 0.75f;
         }

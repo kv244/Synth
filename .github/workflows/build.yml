@@ -52,7 +52,8 @@ jobs:
             -G Ninja \
             -DJUCE_DIR=/tmp/JUCE \
             -DCMAKE_BUILD_TYPE=Release \
-            -DNEONSYNTH_BUILD_TESTS=ON
+            -DNEONSYNTH_BUILD_TESTS=ON \
+            -DNEONSYNTH_WARNINGS_AS_ERRORS=ON
 
       - name: Build VST3 and unit tests
         run: cmake --build build --target NeonSynth_VST3 unit_tests

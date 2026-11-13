@@ -202,6 +202,29 @@ int main()
         if (b % 110 == 0)
             setParameter (processor, "chopComb", (float) (1 + (b / 110) % 32));
 
+        // Noise, Fold and the grain knobs (S6): without these the allocation check never ran the
+        // noise generator, the folder with its oversampling filters, or the grain settings
+        // hand-over. The periods are different (and mostly prime), so the values meet in many
+        // combinations during the 20 s.
+        if (b % 90 == 0)
+            setParameter (processor, "noiseLevel", (float) ((b / 90) % 5) * 25.0f);        // 0, 25 ... 100 %
+        if (b % 170 == 0)
+            setParameter (processor, "foldDrive", 1.0f + (float) ((b / 170) % 4) * 3.0f);  // 1, 4, 7, 10
+        if (b % 130 == 0)
+            setParameter (processor, "foldMix", (float) ((b / 130) % 5) * 25.0f);          // 0 skips the fold
+        if (b % 50 == 0)
+            setParameter (processor, "grPos", (float) ((b / 50) % 5) * 0.25f);
+        if (b % 150 == 0)
+            setParameter (processor, "grScan", (float) ((b / 150) % 5) - 2.0f);            // -2 ... 2 x the file's speed
+        if (b % 95 == 0)
+            setParameter (processor, "grSize", 5.0f + (float) ((b / 95) % 4) * 165.0f);    // 5 ... 500 ms
+        if (b % 85 == 0)
+            setParameter (processor, "grDensity", 1.0f + (float) ((b / 85) % 4) * 66.0f);  // 1 ... 199 per second
+        if (b % 65 == 0)
+            setParameter (processor, "grSpray", (float) ((b / 65) % 5) * 0.25f);
+        if (b % 75 == 0)
+            setParameter (processor, "grJitter", (float) ((b / 75) % 5) * 25.0f);          // cents
+
         inAudioCallback = true;
         processor.processBlock (buffer, midi);
         inAudioCallback = false;
