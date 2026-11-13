@@ -47,6 +47,7 @@ Windows 10 or 11, 64-bit. Download `NeonSynth-x.y.z-Windows-Setup.exe` from the
 |---|---|
 | VST3 instrument | `C:\Program Files\Common Files\VST3\NeonSynth.vst3` |
 | Standalone application (optional) | `C:\Program Files\AudioDSP\Neon Synth\NeonSynth.exe` |
+| User manual as a PDF (optional; installers after v1.7.1) | `C:\Program Files\AudioDSP\Neon Synth\NeonSynth-User-Manual-x.y.z.pdf`, with a Start menu shortcut |
 
 In a DAW, rescan your VST3 plugins and look for **NeonSynth** under the manufacturer **AudioDSP**. In the
 Standalone, choose your audio output and MIDI input under **Options → Audio/MIDI Settings**; with no MIDI

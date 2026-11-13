@@ -49,6 +49,7 @@ Download `NeonSynth-1.7.1-Windows-Setup.exe` from the [v1.7.1 release page](http
 |---|---|
 | VST3 instrument | `C:\Program Files\Common Files\VST3\NeonSynth.vst3` |
 | Standalone application | `C:\Program Files\AudioDSP\Neon Synth\NeonSynth.exe` |
+| This manual as a PDF (optional; installers after v1.7.1) | `C:\Program Files\AudioDSP\Neon Synth\NeonSynth-User-Manual-x.y.z.pdf`, with a Start menu shortcut |
 
 These are the documented default installation locations; the standalone installation directory can be changed in the installer.
 
