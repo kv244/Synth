@@ -192,7 +192,7 @@ The cycle is divided into the steps of CHOP's pattern. A shaded step is chopped;
 - **Drag across steps** to set them all the same way as the first one you clicked.
 - With COMB above 1 the pattern repeats along the cycle, so clicking any copy of a step changes every copy.
 
-The pattern is shared by all voices and saved with the session, like the sequencer's steps. It is not a host parameter, and a click cannot be undone; click the step again instead. A new instance, or a session saved before v1.6.0, starts with every second step chopped, so turning up OVERTONE does something straight away.
+The pattern is shared by all voices and saved with the session, like the sequencer's steps. It is not a host parameter, and a click cannot be undone; click the step again instead. A new instance, or a session saved before v1.6.0, starts with every second step chopped, so turning up OVERTONE does something straight away. Pattern edits and PAD loads are not host parameters, so a DAW may not ask to save them when you close the project; save the project yourself after making them.
 
 With Random selected, the drawing follows the 16 levels of the lowest Random note sounding, so you can watch them drift as they are re-rolled. With no Random note sounding it shows a fixed example set.
 
