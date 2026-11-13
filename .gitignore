@@ -4,3 +4,7 @@ build/
 NeonSynth-*-Windows-Setup.exe
 __pycache__/
 .manual-print.html
+# Built from the manual by docs/build_manual.py, and attached to each release
+docs/*.pdf
+# The demo piece lives on the 'demo' release, one copy (see docs/DEVELOPMENT.md)
+docs/demo/*.wav

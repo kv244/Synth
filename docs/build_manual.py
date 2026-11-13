@@ -3,7 +3,8 @@
 """Checks the user manual against the source and prints it to PDF.
 
     python docs/build_manual.py --check                  # checks only
-    python docs/build_manual.py --out build/manual       # checks, then writes the PDF
+    python docs/build_manual.py                          # checks, then writes the PDF to docs/
+    python docs/build_manual.py --out build/manual       # ... or to another folder (CI does this)
 
 The check fails (exit 1) when the manual does not match the code it ships with:
   * "Applies to" and the source tag must name the version in CMakeLists.txt;
@@ -136,7 +137,7 @@ def print_pdf(html_text, pdf_path):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--check", action="store_true", help="check only; write nothing")
-    ap.add_argument("--out", type=pathlib.Path, default=ROOT / "build" / "manual")
+    ap.add_argument("--out", type=pathlib.Path, default=HERE)   # docs/; the PDF is in .gitignore
     a = ap.parse_args()
 
     version = project_version()

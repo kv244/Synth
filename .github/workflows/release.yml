@@ -10,7 +10,8 @@ name: Release
 # The job refuses to run if the tag doesn't match the CMakeLists.txt version, if
 # the manual or its cover still names another version, or if a release for the tag
 # already exists, so a release is never overwritten. Pushing to master publishes
-# nothing. After the release is created, manual-pdf attaches the manual as a PDF.
+# nothing. The manual is printed to PDF first (job manual); the installer carries that PDF in
+# the NeonSynth folder, and after the release is created attach-manual attaches the same file.
 
 on:
   push:
@@ -21,7 +22,43 @@ permissions:
   contents: write
 
 jobs:
+  # Prints the user manual to PDF once. The installer packs this file and the release gets the
+  # same one. build_manual.py checks the manual against the source first, so a release with a
+  # manual or cover from another version stops here.
+  manual:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262   # v4.4.0
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: '3.14'
+
+      - name: Install the PDF tools
+        run: |
+          pip install -r docs/requirements-manual.txt
+          # --with-deps installs Chromium's libraries and fonts through apt. When the runner can't
+          # reach Ubuntu's package servers (PR #20 hit that three times in an hour), install the
+          # browser alone: the runner image already carries Chrome's libraries.
+          timeout 300 python -m playwright install --with-deps chromium || python -m playwright install chromium
+          fc-list | grep -qiE 'liberation sans|dejavu sans' \
+            || echo '::warning::Neither Liberation Sans nor DejaVu Sans is installed; the PDF falls back to another font'
+
+      - name: Print the manual to PDF
+        run: python docs/build_manual.py --out build/manual
+
+      - name: Keep the PDF for the installer and the release
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02   # v4.6.2
+        with:
+          name: NeonSynth-User-Manual
+          path: build/manual/*.pdf
+          if-no-files-found: error
+          retention-days: 1
+
   build-installer:
+    needs: manual
     runs-on: windows-latest
     timeout-minutes: 60
 
@@ -93,6 +130,12 @@ jobs:
               --validate build\NeonSynth_artefacts\Release\VST3\NeonSynth.vst3
           exit $LASTEXITCODE
 
+      - name: Get the manual PDF for the installer
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093   # v4.3.0
+        with:
+          name: NeonSynth-User-Manual
+          path: build/manual
+
       - name: Install NSIS
         run: choco install nsis -y --no-progress
 
@@ -120,6 +163,7 @@ jobs:
             |---|---|
             | VST3 plugin | `C:\Program Files\Common Files\VST3\NeonSynth.vst3` |
             | Standalone app | `C:\Program Files\AudioDSP\Neon Synth\NeonSynth.exe` |
+            | User manual (PDF) | `C:\Program Files\AudioDSP\Neon Synth\NeonSynth-User-Manual-${{ steps.version.outputs.tag }}.pdf` |
 
             Upgrading from BasicSynth (v1.3 and earlier)? The installer removes the old
             `BasicSynth.vst3`; projects saved with BasicSynth open with NeonSynth.
@@ -135,33 +179,21 @@ jobs:
           files: NeonSynth-${{ steps.version.outputs.tag }}-Windows-Setup.exe
           generate_release_notes: true
 
-  # Prints the user manual to PDF and attaches it to the release created above.
-  manual-pdf:
+  # Attaches the manual PDF (the one inside the installer) to the release created above.
+  attach-manual:
     needs: build-installer
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262   # v4.4.0
-
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+      - name: Get the manual PDF
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093   # v4.3.0
         with:
-          python-version: '3.14'
-
-      - name: Install the PDF tools
-        run: |
-          pip install -r docs/requirements-manual.txt
-          # --with-deps installs Chromium's libraries and fonts through apt. When the runner can't
-          # reach Ubuntu's package servers (PR #20 hit that three times in an hour), install the
-          # browser alone: the runner image already carries Chrome's libraries.
-          timeout 300 python -m playwright install --with-deps chromium || python -m playwright install chromium
-          fc-list | grep -qiE 'liberation sans|dejavu sans' \
-            || echo '::warning::Neither Liberation Sans nor DejaVu Sans is installed; the PDF falls back to another font'
-
-      - name: Print the manual to PDF
-        run: python docs/build_manual.py --out build/manual
+          name: NeonSynth-User-Manual
+          path: build/manual
 
       - name: Attach the PDF to the release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: gh release upload "$GITHUB_REF_NAME" build/manual/*.pdf --clobber
