@@ -38,7 +38,7 @@ jobs:
         run: git clone --depth=1 --branch 9.0.0 https://github.com/juce-framework/JUCE.git C:\JUCE
 
       - name: Configure
-        run: cmake -S . -B build -DJUCE_DIR="C:/JUCE" -DNEONSYNTH_BUILD_TESTS=ON
+        run: cmake -S . -B build -DJUCE_DIR="C:/JUCE" -DNEONSYNTH_BUILD_TESTS=ON -DNEONSYNTH_WARNINGS_AS_ERRORS=ON
 
       - name: Build plugin, unit tests and benchmark
         run: cmake --build build --config Release --parallel

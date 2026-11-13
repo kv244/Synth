@@ -18,6 +18,28 @@ add_subdirectory("${JUCE_DIR}" "${CMAKE_BINARY_DIR}/JUCE")
 # unless asked (/fp:contract), so it needs no flag.
 add_compile_options($<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>>:-ffp-contract=off>)
 
+# JUCE's recommended warning flags include -Wfloat-equal. This code compares floats exactly on
+# purpose (a parameter still at its default, a value that was just set, a stored flag), so that
+# one warning is switched off, which leaves the rest of the warnings readable. This interface
+# target must be linked AFTER juce_recommended_warning_flags: CMake puts a dependency's options
+# after the target's own, so only a later-linked target can override JUCE's flag. MSVC does not
+# have the warning.
+add_library(neonsynth_warning_tweaks INTERFACE)
+if(NOT MSVC)
+    target_compile_options(neonsynth_warning_tweaks INTERFACE -Wno-float-equal)
+endif()
+
+# CI turns this on, so a new warning in the project's own code fails the build. It is off by
+# default so that a newer compiler cannot stop anyone from building a release locally.
+option(NEONSYNTH_WARNINGS_AS_ERRORS "Treat compiler warnings in NeonSynth's own code as errors" OFF)
+if(NEONSYNTH_WARNINGS_AS_ERRORS)
+    if(MSVC)
+        target_compile_options(neonsynth_warning_tweaks INTERFACE /WX)
+    else()
+        target_compile_options(neonsynth_warning_tweaks INTERFACE -Werror)
+    endif()
+endif()
+
 juce_add_plugin(NeonSynth
     VERSION                     1.7.1
     COMPANY_NAME                "AudioDSP"
@@ -84,6 +106,7 @@ target_link_libraries(NeonSynth
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags
+        neonsynth_warning_tweaks
 )
 
 target_include_directories(NeonSynth
@@ -118,7 +141,8 @@ if(NEONSYNTH_BUILD_TESTS)
             juce::juce_audio_basics
             juce::juce_audio_formats
             juce::juce_recommended_config_flags
-            juce::juce_recommended_warning_flags)
+            juce::juce_recommended_warning_flags
+            neonsynth_warning_tweaks)
         add_dependencies(unit_tests ${test})
         add_test(NAME ${test} COMMAND ${test})
     endforeach()
@@ -145,7 +169,8 @@ if(NEONSYNTH_BUILD_TESTS)
             juce::juce_dsp
             juce::juce_recommended_config_flags
             juce::juce_recommended_lto_flags
-            juce::juce_recommended_warning_flags)
+            juce::juce_recommended_warning_flags
+            neonsynth_warning_tweaks)
     endforeach()
 
     foreach(program RealtimeSafetyTests ParameterLayoutTests EditorTests)

@@ -208,9 +208,9 @@ public:
     /** One sample (for tests; the voice renders whole blocks). */
     float nextSample() noexcept
     {
-        float x;
-        render (&x, 1);
-        return x;
+        float x[8];   // render() writes only x[0]. Eight floats keep GCC's array-bounds check quiet
+        render (x, 1);   // about the SSE2 (4 wide) and AVX2 (8 wide) paths, which a one-sample call never enters
+        return x[0];
     }
 
 private:

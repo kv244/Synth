@@ -65,6 +65,8 @@ cmake --build build --config Release --target unit_tests RenderBenchmark
 ctest --test-dir build -C Release --output-on-failure
 ```
 
+CI also configures with `-DNEONSYNTH_WARNINGS_AS_ERRORS=ON`, so a compiler warning in NeonSynth's own code fails the build. It is off by default, so a newer compiler cannot stop anyone from building locally. One warning is switched off for the project, `-Wfloat-equal` (GCC and Clang), because the code compares floats exactly on purpose; the CMake file says why.
+
 | Program | What it checks |
 |---|---|
 | `StepSequencerTests` | Sequencer timing, gate, swing, rates, block-size independence, stop and loop handling, tolerance of small transport drift, triggers disabled, retriggering, step packing |

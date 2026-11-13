@@ -54,14 +54,6 @@ namespace
             x = osc.nextSample();
         return out;
     }
-
-    double rms (const std::vector<float>& x, size_t from, size_t to)
-    {
-        double sum = 0.0;
-        for (size_t i = from; i < to; ++i)
-            sum += (double) x[i] * x[i];
-        return std::sqrt (sum / (double) (to - from));
-    }
 }
 
 int main()

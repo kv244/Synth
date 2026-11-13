@@ -224,7 +224,7 @@ int main()
     GestureLog gestures;
     processor.addListener (&gestures);
 
-    std::unique_ptr<juce::AudioProcessorEditor> editor (processor.createEditorIfNeeded());
+    std::unique_ptr<juce::AudioProcessorEditor> editor (processor.createEditorAndMakeActive());
     if (editor == nullptr)
     {
         std::printf ("FAIL  the processor made no editor\n");
@@ -675,7 +675,9 @@ int main()
                         pump (70);   // two timer ticks: views refresh from the voices
 
                         const auto image = ed.createComponentSnapshot (ed.getLocalBounds(), true, 1.0f);
-                        if (const auto* dir = std::getenv ("NEONSYNTH_SNAPSHOT_DIR"); dir != nullptr && image.isValid())   // look at them: set this to a folder
+                        // Look at them: set NEONSYNTH_SNAPSHOT_DIR to a folder. (JUCE's call instead of std::getenv,
+                        // which MSVC deprecates.)
+                        if (const auto dir = juce::SystemStats::getEnvironmentVariable ("NEONSYNTH_SNAPSHOT_DIR", {}); dir.isNotEmpty() && image.isValid())
                             if (juce::File (dir).createDirectory().wasOk())
                                 if (juce::FileOutputStream out (juce::File (dir).getChildFile (juce::String (juce::roundToInt (scale * 100)) + "-" + sourceNames[source]
                                                                           + (view == 0 ? "-scope" : "-spectrum") + (withHelp ? "-help" : "") + ".png")); out.openedOk())
