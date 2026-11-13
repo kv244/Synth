@@ -71,7 +71,7 @@ MIDI logging and the layout of the source.
 
 | Version | Date | What changed |
 |---|---|---|
-| [v1.7.0](https://github.com/kv244/Synth/releases/tag/v1.7.0) | 12 Nov 2026 | A new 1280 × 860 window that scales from 75% to 150%; the envelope's four points can be dragged on its graph; Esc closes the help page from any control |
+| [v1.7.1](https://github.com/kv244/Synth/releases/tag/v1.7.1) | 13 Nov 2026 | Review fixes: sample loading and replacement, Granular bracket, CI runs once per commit, code statistics report; no change to controls or sound | A new 1280 × 860 window that scales from 75% to 150%; the envelope's four points can be dragged on its graph; Esc closes the help page from any control |
 | [v1.6.0](https://github.com/kv244/Synth/releases/tag/v1.6.0) | 11 Nov 2026 | Waveform sculpting: CHOP, Noise and Fold, with the SHAPE strip; cleaner band-limited oscillators; the illustrated manual and its PDF |
 | [v1.5.0](https://github.com/kv244/Synth/releases/tag/v1.5.0) | 5 Nov 2026 | Sample, Granular and Random sources; the sample is saved inside the session |
 | [v1.4.0](https://github.com/kv244/Synth/releases/tag/v1.4.0) | 5 Nov 2026 | Hardening: sample-accurate notes, the output soft clipper, a new envelope, no stuck notes. Renamed from BasicSynth to NeonSynth (old projects still open); licence changed from MIT to AGPLv3 |
